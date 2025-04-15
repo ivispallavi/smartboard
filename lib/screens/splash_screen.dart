@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'signin_screen.dart';
+
 import 'home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -16,25 +16,15 @@ class _SplashScreenState extends State<SplashScreen> {
     _navigate();
   }
 
-  void _navigate() async {
-  await Future.delayed(Duration(seconds: 2)); // Simulating a loading time
-  
-  final user = Supabase.instance.client.auth.currentUser; // Get current user
-  
-  if (user != null) {
-    // User is logged in
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => HomeScreen()),
-    );
-  } else {
-    // No user logged in, go to Sign In screen
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => SignInScreen()),
-    );
-  }
+void _navigate() async {
+  await Future.delayed(const Duration(seconds: 2)); // Simulate loading time
+
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(builder: (_) => const HomeScreen()),
+  );
 }
+
 
   @override
   Widget build(BuildContext context) {

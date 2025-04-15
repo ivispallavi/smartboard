@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'whiteboard_screen.dart';
-import 'signin_screen.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'package:intl/intl.dart';
@@ -38,29 +38,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _isDarkMode = !_isDarkMode;
       prefs.setBool('isDarkMode', _isDarkMode);
     });
-    
-    // Apply the theme change
-    final ThemeMode themeMode = _isDarkMode ? ThemeMode.dark : ThemeMode.light;
-    // This assumes you have a way to update your app's theme
-    // You may need to adapt this to your theme implementation
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Update your app theme here if needed
-    });
   }
 
-  Future<void> _signOut() async {
-    await supabase.auth.signOut();
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const SignInScreen()),
-    );
-  }
 
-  /// Load saved whiteboards from SharedPreferences
   Future<void> _loadSavedWhiteboards() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     final List<String>? savedData = prefs.getStringList('whiteboardsData');
-    
+
     if (savedData != null) {
       setState(() {
         savedWhiteboards = savedData.map((item) {
@@ -78,7 +62,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }).toList();
       });
     } else {
-      // For backward compatibility with your old format
       final List<String>? oldPaths = prefs.getStringList('whiteboards');
       if (oldPaths != null && oldPaths.isNotEmpty) {
         final now = DateTime.now().toString();
@@ -88,24 +71,20 @@ class _HomeScreenState extends State<HomeScreen> {
             'lastModified': now,
           }).toList();
         });
-        
-        // Save in the new format
         await _saveWhiteboardsData();
       }
     }
   }
-  
+
   Future<void> _saveWhiteboardsData() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     final List<String> dataToSave = savedWhiteboards.map((item) {
       return "${item['path']}|${item['lastModified']}";
     }).toList();
-    
     await prefs.setStringList('whiteboardsData', dataToSave);
   }
-  
+
   Future<void> _deleteWhiteboard(int index) async {
-    // Show confirmation dialog
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -123,7 +102,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
-    
+
     if (confirm == true) {
       setState(() {
         savedWhiteboards.removeAt(index);
@@ -131,19 +110,17 @@ class _HomeScreenState extends State<HomeScreen> {
       await _saveWhiteboardsData();
     }
   }
-  
 
-
-void _editWhiteboard(String path) {
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (context) => WhiteboardScreen(imagePath: path),
-    ),
-  ).then((_) {
-    _loadSavedWhiteboards(); // Refresh after returning from Whiteboard
-  });
-}
+  void _editWhiteboard(String path) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => WhiteboardScreen(imagePath: path),
+      ),
+    ).then((_) {
+      _loadSavedWhiteboards();
+    });
+  }
 
   String _formatDate(String dateString) {
     try {
@@ -181,11 +158,6 @@ void _editWhiteboard(String path) {
               onPressed: _toggleTheme,
               tooltip: _isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
             ),
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: _signOut,
-              tooltip: 'Sign Out',
-            ),
           ],
         ),
         body: Column(
@@ -199,7 +171,7 @@ void _editWhiteboard(String path) {
                     builder: (context) => WhiteboardScreen(),
                   ),
                 ).then((_) {
-                  _loadSavedWhiteboards(); // Refresh after returning from Whiteboard
+                  _loadSavedWhiteboards();
                 });
               },
               style: ElevatedButton.styleFrom(
@@ -222,7 +194,7 @@ void _editWhiteboard(String path) {
                       padding: const EdgeInsets.all(8),
                       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 2,
-                        childAspectRatio: 0.8, // Adjusted for date display
+                        childAspectRatio: 0.8,
                         crossAxisSpacing: 8,
                         mainAxisSpacing: 8,
                       ),
@@ -231,7 +203,9 @@ void _editWhiteboard(String path) {
                         final whiteboard = savedWhiteboards[index];
                         final path = whiteboard['path'];
                         final lastModified = whiteboard['lastModified'];
-                        
+                        final file = File(path);
+                        final fileExists = file.existsSync();
+
                         return Card(
                           clipBehavior: Clip.antiAlias,
                           elevation: 3,
@@ -240,67 +214,81 @@ void _editWhiteboard(String path) {
                             children: [
                               Expanded(
                                 child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => ImageViewer(path),
-                                      ),
-                                    );
-                                  },
+                                  onTap: fileExists
+                                      ? () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => ImageViewer(path),
+                                            ),
+                                          );
+                                        }
+                                      : null,
                                   child: Stack(
                                     fit: StackFit.expand,
                                     children: [
-                                      Image.file(
-                                        File(path),
-                                        fit: BoxFit.cover,
-                                      ),
-                                      Positioned(
-                                        top: 4,
-                                        right: 4,
-                                        child: PopupMenuButton<String>(
-                                          icon: Container(
-                                            decoration: BoxDecoration(
-                                              color: Colors.black45,
-                                              borderRadius: BorderRadius.circular(12),
+                                      fileExists
+                                          ? Image.file(
+                                              file,
+                                              fit: BoxFit.cover,
+                                            )
+                                          : Container(
+                                              color: Colors.grey[300],
+                                              child: const Center(
+                                                child: Text(
+                                                  "Image not found",
+                                                  style: TextStyle(color: Colors.red),
+                                                  textAlign: TextAlign.center,
+                                                ),
+                                              ),
                                             ),
-                                            padding: const EdgeInsets.all(4),
-                                            child: const Icon(
-                                              Icons.more_vert,
-                                              color: Colors.white,
+                                      if (fileExists)
+                                        Positioned(
+                                          top: 4,
+                                          right: 4,
+                                          child: PopupMenuButton<String>(
+                                            icon: Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.black45,
+                                                borderRadius: BorderRadius.circular(12),
+                                              ),
+                                              padding: const EdgeInsets.all(4),
+                                              child: const Icon(
+                                                Icons.more_vert,
+                                                color: Colors.white,
+                                              ),
                                             ),
+                                            onSelected: (value) {
+                                              if (value == 'edit') {
+                                                _editWhiteboard(path);
+                                              } else if (value == 'delete') {
+                                                _deleteWhiteboard(index);
+                                              }
+                                            },
+                                            itemBuilder: (context) => [
+                                              const PopupMenuItem<String>(
+                                                value: 'edit',
+                                                child: Row(
+                                                  children: [
+                                                    Icon(Icons.edit),
+                                                    SizedBox(width: 8),
+                                                    Text('Edit'),
+                                                  ],
+                                                ),
+                                              ),
+                                              const PopupMenuItem<String>(
+                                                value: 'delete',
+                                                child: Row(
+                                                  children: [
+                                                    Icon(Icons.delete),
+                                                    SizedBox(width: 8),
+                                                    Text('Delete'),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                          onSelected: (value) {
-                                            if (value == 'edit') {
-                                              _editWhiteboard(path);
-                                            } else if (value == 'delete') {
-                                              _deleteWhiteboard(index);
-                                            }
-                                          },
-                                          itemBuilder: (context) => [
-                                            const PopupMenuItem<String>(
-                                              value: 'edit',
-                                              child: Row(
-                                                children: [
-                                                  Icon(Icons.edit),
-                                                  SizedBox(width: 8),
-                                                  Text('Edit'),
-                                                ],
-                                              ),
-                                            ),
-                                            const PopupMenuItem<String>(
-                                              value: 'delete',
-                                              child: Row(
-                                                children: [
-                                                  Icon(Icons.delete),
-                                                  SizedBox(width: 8),
-                                                  Text('Delete'),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
                                         ),
-                                      ),
                                     ],
                                   ),
                                 ),
@@ -331,7 +319,6 @@ void _editWhiteboard(String path) {
   }
 }
 
-/// Image Viewer for saved whiteboards
 class ImageViewer extends StatelessWidget {
   final String imagePath;
 
