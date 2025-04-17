@@ -31,6 +31,25 @@
 
   <title>smartboards</title>
   <link rel="manifest" href="manifest.json">
+  <script>
+    // Fix CORS for your domain
+    document.addEventListener('DOMContentLoaded', () => {
+      if (window.flutterWebRenderer === 'html') {
+        window.addEventListener('flutter-first-frame', () => {
+          const originalFetch = window.fetch;
+          window.fetch = (url, options) => {
+            if (typeof url === 'string' && url.includes('chat.ivislabs.in')) {
+              options = options || {};
+              options.mode = 'no-cors'; // Bypass CORS
+              options.credentials = 'omit';
+            }
+            return originalFetch(url, options);
+          };
+        });
+      }
+    });
+  </script>
+
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
