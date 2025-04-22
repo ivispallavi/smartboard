@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'whiteboard_screen.dart';
+import 'periodic_table_screen.dart'; // Import the new screen
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
@@ -163,28 +164,55 @@ class _HomeScreenState extends State<HomeScreen> {
         body: Column(
           children: [
             const SizedBox(height: 20),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => WhiteboardScreen(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => WhiteboardScreen(),
+                      ),
+                    ).then((_) {
+                      _loadSavedWhiteboards();
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 30),
+                    backgroundColor: Colors.blueAccent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                ).then((_) {
-                  _loadSavedWhiteboards();
-                });
-              },
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 30),
-                backgroundColor: Colors.blueAccent,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  child: const Text(
+                    'New Whiteboard',
+                    style: TextStyle(fontSize: 18, color: Colors.white),
+                  ),
                 ),
-              ),
-              child: const Text(
-                'New Whiteboard',
-                style: TextStyle(fontSize: 18, color: Colors.white),
-              ),
+                // Add Periodic Table button
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PeriodicTableScreen(),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 30),
+                    backgroundColor: Colors.greenAccent[700],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Periodic Table',
+                    style: TextStyle(fontSize: 18, color: Colors.white),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 20),
             Expanded(

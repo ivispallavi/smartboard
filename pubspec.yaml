@@ -2,7 +2,11 @@ name: smart_board
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
+<<<<<<< HEAD
 publish_to: "none" # Remove this line if you wish to publish to pub.dev
+=======
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+>>>>>>> 813db8c (components saparated)
 
 # The following defines the version and build number for your application.
 # A version number is three numbers separated by dots, like 1.2.43
@@ -31,14 +35,27 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_colorpicker: ^1.0.3 # For the color wheel
+<<<<<<< HEAD
   path_provider: ^2.1.2 # To store exported files
+=======
+  path_provider: ^2.0.15 # To store exported files
+>>>>>>> 813db8c (components saparated)
   permission_handler: ^11.3.0 # For storage permissions (Android)
   screenshot: ^3.0.0
   flutter_screenutil: ^5.9.0
   pdf: ^3.10.8
   printing: ^5.11.0
+<<<<<<< HEAD
 
   image_picker: ^0.8.7+5 # Use the latest version available
+=======
+  google_ml_kit: ^0.16.3
+  http: ^1.1.0
+  flutter_inappwebview: ^6.0.0-beta.24
+  image_picker: ^0.8.9  # Use the latest version available
+   
+ 
+>>>>>>> 813db8c (components saparated)
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -47,25 +64,41 @@ dependencies:
   shared_preferences: ^2.5.2
   share_plus: ^7.2.1
   intl: ^0.20.2
+<<<<<<< HEAD
 
   universal_html: ^2.0.8
 
   image_gallery_saver: ^2.0.3
 
   http: ^0.13.5
+=======
+  image: ^4.0.17
+
+>>>>>>> 813db8c (components saparated)
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_launcher_icons: ^0.13.1
+<<<<<<< HEAD
 
   flutter_lints: ^5.0.0
 
+=======
+  
+  flutter_lints: ^5.0.0
+
+
+>>>>>>> 813db8c (components saparated)
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
+<<<<<<< HEAD
+=======
+  
+>>>>>>> 813db8c (components saparated)
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -114,3 +147,7 @@ flutter_icons:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+<<<<<<< HEAD
+=======
+
+>>>>>>> 813db8c (components saparated)

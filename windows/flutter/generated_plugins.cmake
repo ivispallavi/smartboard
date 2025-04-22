@@ -5,6 +5,10 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   file_selector_windows
+<<<<<<< HEAD
+=======
+  flutter_inappwebview_windows
+>>>>>>> 813db8c (components saparated)
   permission_handler_windows
   printing
   share_plus
