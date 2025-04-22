@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:smart_board/screens/shape_utils.dart';
+import 'package:smart_board/screens/shapemeasurement.dart';
 import '../painters/whiteboard_painter.dart' as painter;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -343,6 +345,29 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
                 onPressed: points.isEmpty ? null : _showClearConfirmation,
                 color: points.isEmpty ? Colors.grey : Colors.black,
               ),
+              // New button for shapes and measurements
+            IconButton(
+              icon: const Icon(Icons.crop_square),
+              tooltip: 'Shapes & Measurements',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ShapeMeasurementScreen(
+                      onShapeCreated: (ShapeItem shape) {
+                        // Here you can handle the shape data returned from the screen
+                        // For example, you could add it to a list of shapes to be rendered
+                        // on your whiteboard
+                        setState(() {
+                          // Add shape to your whiteboard's shape list
+                          // Example: shapes.add(shape);
+                        });
+                      },
+                    ),
+                  ),
+                );
+              },
+            ),
               
               // Extend Canvas Button
               _buildToolButton(
