@@ -10,6 +10,21 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/drawing_point.dart';
 
+import '../widgets/advanced_graph_dialog.dart';
+import '../services/ai_graph_service.dart';
+import '../models/graph_settings_model.dart';
+import '../services/nlp_graph_service.dart';
+import '../widgets/enhanced_graph_dialog.dart';
+import '../services/graph_service.dart';
+
+// Add another drawing mode in the DrawingMode enum in your models or directly in the whiteboard_screen.dart
+enum DrawingMode {
+  pen,
+  eraser,
+  graph, // Add this mode
+  // Add other modes as needed
+}
+
 class WhiteboardScreen extends StatefulWidget {
   final String? imagePath;
   const WhiteboardScreen({this.imagePath, super.key});
@@ -98,6 +113,11 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
       appBar: AppBar(
         title: Text(widget.imagePath != null ? "Edit Whiteboard" : "New Whiteboard"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.help_outline),
+            onPressed: _showAIGraphHelp,
+            tooltip: 'Graph Plotting Help',
+          ),
           _buildMoreMenu(),
         ],
       ),
@@ -141,7 +161,18 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
               ),
             ),
           ),
-          
+          // Add a quick access button for graph plotting
+          Positioned(
+            bottom: isToolbarVisible ? 220 : 70, // Position above toolbar
+            right: 20,
+            child: FloatingActionButton(
+              heroTag: 'graphButton',
+              mini: true,
+              child: const Icon(Icons.functions),
+              onPressed: () => _showGraphDialog(),
+              tooltip: 'Plot Graph',
+            ),
+          ),
           // Download button (always visible above toolbar)
           Positioned(
             bottom: isToolbarVisible ? 200 : 30, // Positioned above the toolbar or toggle button
@@ -165,7 +196,6 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
               ),
             ),
           ),
-          
           // Toolbar toggle button (always visible)
           Positioned(
             bottom: 0,
@@ -185,7 +215,6 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
               ),
             ),
           ),
-          
           // Sliding toolbar
           Positioned(
             bottom: 0,
@@ -322,6 +351,14 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
                 onPressed: () => setState(() => currentMode = DrawingMode.eraser),
               ),
               
+              // Graph Button (Add this)
+              _buildToolButton(
+                icon: Icons.functions,
+                isSelected: currentMode == DrawingMode.graph,
+                onPressed: () => _showGraphDialog(),
+                tooltip: 'Plot Graph',
+              ),
+
               // Color Picker
               _buildColorPicker(),
               
@@ -551,6 +588,177 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
         ],
       ),
     );
+  }
+
+  void _showGraphDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // Prevent dismissing by tapping outside
+      builder: (context) => AdvancedGraphDialog(
+        onPlotRequested: _plotGraphWithSettings,
+      ),
+    );
+  }
+
+  // Update the _plotGraph method to use AI when requested:
+  void _plotGraph(String equation, bool useAI) {
+    // Get the center of the visible canvas area
+    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+    final size = canvasRenderBox.size;
+    
+    // Calculate the center point, considering scroll position
+    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+    final center = Offset(
+      size.width / 2, 
+      (size.height / 2) + scrollOffset
+    );
+    
+    // Add current points to undo history
+    if (points.isNotEmpty) {
+      undoHistory.add(List.from(points));
+    }
+    
+    // Plot the graph using either basic or AI service
+    List<DrawingPoint> graphPoints;
+    
+    if (useAI) {
+      // Use the AI-powered service
+      graphPoints = AIGraphService.plotEquation(
+        equation,
+        size.width * 0.8, // 80% of canvas width for the graph
+        size.height * 0.6, // 60% of canvas height for the graph
+        center,
+        selectedColor,
+        penStrokeWidth
+      );
+    } else {
+      // Use the basic service
+      graphPoints = GraphService.plotEquation(
+        equation,
+        size.width * 0.8,
+        size.height * 0.6,
+        center,
+        selectedColor,
+        penStrokeWidth
+      );
+    }
+    
+    // Add graph points to the canvas
+    setState(() {
+      points.addAll(graphPoints);
+      // Add current stroke to undo history
+      undoHistory.add(List.from(points));
+      // Clear redo history since we added something new
+      redoHistory.clear();
+    });
+  }
+
+  void _showAIGraphHelp() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('AI Graph Plotting'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'The AI Graph Plotter can plot these types of equations:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text('• Basic expressions: x^2, 2*x+1'),
+            Text('• Trigonometric functions: sin(x), cos(x), tan(x)'),
+            Text('• Square roots: sqrt(x)'),
+            Text('• Absolute values: abs(x)'),
+            Text('• Polynomials: x^3-2*x^2+3*x-4'),
+            SizedBox(height: 16),
+            Text(
+              'Tips:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text('• Use * for multiplication (e.g., 2*x not 2x)'),
+            Text('• Use parentheses to group operations'),
+            Text('• Enter one equation at a time'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Add a method to plot using the enhanced settings
+  void _plotGraphWithSettings(GraphSettings settings) {
+    // Get the center of the visible canvas area
+    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+    final size = canvasRenderBox.size;
+    
+    // Calculate the center point, considering scroll position
+    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+    final center = Offset(
+      size.width / 2, 
+      (size.height / 2) + scrollOffset
+    );
+    
+    // Add current points to undo history
+    if (points.isNotEmpty) {
+      undoHistory.add(List.from(points));
+    }
+    
+    // Plot the graph using the AI service
+    List<DrawingPoint> graphPoints = AIGraphService.plotEquation(
+      settings.equation,
+      size.width * 0.8, // 80% of canvas width for the graph
+      size.height * 0.6, // 60% of canvas height for the graph
+      center,
+      selectedColor,
+      penStrokeWidth
+    );
+    
+    // Add graph points to the canvas
+    setState(() {
+      points.addAll(graphPoints);
+      // Add current stroke to undo history
+      undoHistory.add(List.from(points));
+      // Clear redo history since we added something new
+      redoHistory.clear();
+    });
+    
+    // Show a toast notification
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('AI-generated graph of "${settings.equation}" plotted'),
+        duration: const Duration(seconds: 2),
+        action: SnackBarAction(
+          label: 'OK',
+          onPressed: () {},
+        ),
+      ),
+    );
+    
+    // Scroll to ensure the graph is visible if needed
+    if (_scrollController.hasClients) {
+      // Calculate the position to scroll to (center of the graph)
+      double targetPosition = center.dy - (size.height / 2);
+      
+      // Ensure it's within bounds
+      targetPosition = targetPosition.clamp(
+        0.0, 
+        _scrollController.position.maxScrollExtent
+      );
+      
+      // Animate to the position
+      _scrollController.animateTo(
+        targetPosition,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   void _clearCanvas() {
