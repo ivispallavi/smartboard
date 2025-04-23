@@ -12,10 +12,22 @@ class DrawingPoint {
   final Color color;
   final double strokeWidth;
   final bool isDeleted;
+  final bool isEndOfStroke;
 
-  DrawingPoint(this.offset, this.color, this.strokeWidth, {this.isDeleted = false});
+  DrawingPoint(
+    this.offset, 
+    this.color, 
+    this.strokeWidth, 
+    {this.isDeleted = false, 
+    this.isEndOfStroke = false}
+  );
 
   factory DrawingPoint.endStroke() {
-    return DrawingPoint(Offset.zero, Colors.transparent, 0);
+    return DrawingPoint(
+      Offset.zero, 
+      Colors.transparent, 
+      0, 
+      isEndOfStroke: true
+    );
   }
 }

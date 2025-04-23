@@ -161,21 +161,22 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
               ),
             ),
           ),
-          // Add a quick access button for graph plotting
-          Positioned(
-            bottom: isToolbarVisible ? 220 : 70, // Position above toolbar
-            right: 20,
-            child: FloatingActionButton(
-              heroTag: 'graphButton',
-              mini: true,
-              child: const Icon(Icons.functions),
-              onPressed: () => _showGraphDialog(),
-              tooltip: 'Plot Graph',
+          // Add a quick access button for graph plotting - only show when toolbar is hidden
+          if (!isToolbarVisible)
+            Positioned(
+              bottom: 70,
+              right: 20,
+              child: FloatingActionButton(
+                heroTag: 'graphButton',
+                mini: true,
+                onPressed: () => _showGraphDialog(),
+                tooltip: 'Plot Graph',
+                child: const Icon(Icons.functions),
+              ),
             ),
-          ),
           // Download button (always visible above toolbar)
           Positioned(
-            bottom: isToolbarVisible ? 200 : 30, // Positioned above the toolbar or toggle button
+            bottom: isToolbarVisible ? 170 : 120, // Positioned above the toolbar and graph button
             right: 20,
             child: Container(
               decoration: BoxDecoration(
@@ -236,72 +237,84 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
     );
   }
 
-  // Fixed drawing handlers with proper coordinate translation
+  // UPDATED: Fixed drawing handlers to correctly transform coordinates
   void _handleDrawStart(DragStartDetails details) {
-    if (!_canvasAreaKey.currentContext!.findRenderObject()!.paintBounds.contains(
-      _canvasAreaKey.currentContext!.findRenderObject()! as RenderBox != null
-          ? (_canvasAreaKey.currentContext!.findRenderObject()! as RenderBox)
-              .globalToLocal(details.globalPosition)
-          : details.localPosition,
-    )) {
-      return; // Ignore if not on canvas
+    try {
+      // Get the render box for coordinate calculation
+      final RenderBox renderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+      
+      // Get the position relative to the canvas - globalToLocal already accounts for scroll
+      final Offset localPosition = renderBox.globalToLocal(details.globalPosition);
+      
+      // Make sure the position is within the canvas bounds
+      if (localPosition.dy < 0 || localPosition.dy > canvasHeight ||
+          localPosition.dx < 0 || localPosition.dx > renderBox.size.width) {
+        return; // Ignore if outside canvas bounds
+      }
+      
+      // Start new stroke
+      currentStroke = [];
+      
+      // Set appropriate color and stroke width based on mode
+      Color pointColor = currentMode == DrawingMode.eraser 
+          ? Colors.white 
+          : selectedColor;
+      
+      double width = currentMode == DrawingMode.eraser 
+          ? eraserStrokeWidth 
+          : penStrokeWidth;
+      
+      setState(() {
+        // Add first point to current stroke
+        DrawingPoint newPoint = DrawingPoint(localPosition, pointColor, width);
+        currentStroke.add(newPoint);
+        points.add(newPoint);
+      });
+    } catch (e) {
+      // Handle any exceptions that might occur
+      print("Error in _handleDrawStart: $e");
     }
-    
-    // Get the local position relative to the canvas widget
-    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
-    Offset localPosition = canvasRenderBox.globalToLocal(details.globalPosition);
-    
-    // Adjust for scroll offset
-    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
-    Offset adjustedPosition = Offset(localPosition.dx, localPosition.dy + scrollOffset);
-    
-    // Start new stroke
-    currentStroke = [];
-    
-    // Set appropriate color and stroke width based on mode
-    Color pointColor = currentMode == DrawingMode.eraser 
-        ? Colors.white 
-        : selectedColor;
-    
-    double width = currentMode == DrawingMode.eraser 
-        ? eraserStrokeWidth 
-        : penStrokeWidth;
-    
-    setState(() {
-      // Add first point to current stroke
-      DrawingPoint newPoint = DrawingPoint(adjustedPosition, pointColor, width);
-      currentStroke.add(newPoint);
-      points.add(newPoint);
-    });
   }
 
+  // UPDATED: Fixed drawing handlers to correctly transform coordinates
   void _handleDrawUpdate(DragUpdateDetails details) {
-    // Get the local position relative to the canvas widget
-    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
-    Offset localPosition = canvasRenderBox.globalToLocal(details.globalPosition);
-    
-    // Adjust for scroll offset
-    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
-    Offset adjustedPosition = Offset(localPosition.dx, localPosition.dy + scrollOffset);
-    
-    // Set appropriate color and stroke width based on mode
-    Color pointColor = currentMode == DrawingMode.eraser 
-        ? Colors.white 
-        : selectedColor;
-    
-    double width = currentMode == DrawingMode.eraser 
-        ? eraserStrokeWidth 
-        : penStrokeWidth;
-    
-    setState(() {
-      // Add point to current stroke and main points list
-      DrawingPoint newPoint = DrawingPoint(adjustedPosition, pointColor, width);
-      currentStroke.add(newPoint);
-      points.add(newPoint);
-    });
+    try {
+      // Get the render box for coordinate calculation
+      final RenderBox renderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+      
+      // Get the position relative to the canvas - globalToLocal already accounts for scroll
+      final Offset localPosition = renderBox.globalToLocal(details.globalPosition);
+      
+      // Make sure the position is within the canvas bounds
+      if (localPosition.dy < 0 || localPosition.dy > canvasHeight ||
+          localPosition.dx < 0 || localPosition.dx > renderBox.size.width) {
+        return; // Ignore if outside canvas bounds
+      }
+      
+      // Set appropriate color and stroke width based on mode
+      Color pointColor = currentMode == DrawingMode.eraser 
+          ? Colors.white 
+          : selectedColor;
+      
+      double width = currentMode == DrawingMode.eraser 
+          ? eraserStrokeWidth 
+          : penStrokeWidth;
+      
+      setState(() {
+        // Add point to current stroke and main points list
+        DrawingPoint newPoint = DrawingPoint(localPosition, pointColor, width);
+        currentStroke.add(newPoint);
+        points.add(newPoint);
+      });
+    } catch (e) {
+      // Handle any exceptions that might occur
+      print("Error in _handleDrawUpdate: $e");
+    }
   }
 
   void _handleDrawEnd() {
+    if (currentStroke.isEmpty) return;
+    
     setState(() {
       // Add end-of-stroke marker
       points.add(DrawingPoint.endStroke());
