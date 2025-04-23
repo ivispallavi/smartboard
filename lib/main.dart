@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'screens/splash_screen.dart'; // Change this to any initial page you want
+import 'screens/splash_screen.dart';
+import 'models/drawing_point.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,8 +66,26 @@ class _MyAppState extends State<MyApp> {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
           title: 'Smart Board',
-          theme: ThemeData.light(),
-          darkTheme: ThemeData.dark(),
+          theme: ThemeData(
+            primarySwatch: Colors.blue,
+            visualDensity: VisualDensity.adaptivePlatformDensity,
+            brightness: Brightness.light,
+            appBarTheme: const AppBarTheme(
+              elevation: 1,
+              backgroundColor: Colors.white,
+              titleTextStyle: TextStyle(color: Colors.black, fontSize: 20),
+              iconTheme: IconThemeData(color: Colors.black),
+            ),
+          ),
+          darkTheme: ThemeData(
+            primarySwatch: Colors.blue,
+            visualDensity: VisualDensity.adaptivePlatformDensity,
+            brightness: Brightness.dark,
+            appBarTheme: AppBarTheme(
+              elevation: 1,
+              backgroundColor: Colors.grey[900],
+            ),
+          ),
           themeMode: _themeMode,
           home: SplashScreen(), // Replace with your actual home page
         );
