@@ -7,6 +7,9 @@ import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/drawing_point.dart';
+import 'package:smart_board/widgets/whiteboard_controls/image_toggle_button.dart';
+import 'package:smart_board/config/app_config.dart';
+import 'package:smart_board/services/api_service.dart';
 
 class WhiteboardScreen extends StatefulWidget {
   final String? imagePath;
@@ -16,39 +19,50 @@ class WhiteboardScreen extends StatefulWidget {
   State<WhiteboardScreen> createState() => _WhiteboardScreenState();
 }
 
-class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerProviderStateMixin {
+class _WhiteboardScreenState extends State<WhiteboardScreen>
+    with SingleTickerProviderStateMixin {
   // Drawing-related variables
   List<DrawingPoint> points = [];
   Color selectedColor = Colors.black;
   double penStrokeWidth = 3.0;
   double eraserStrokeWidth = 15.0;
   DrawingMode currentMode = DrawingMode.pen;
-  
+
   // Undo/Redo history
   List<List<DrawingPoint>> undoHistory = [];
   List<List<DrawingPoint>> redoHistory = [];
   List<DrawingPoint> currentStroke = [];
-  
+
   // Canvas dimensions and control
   double canvasHeight = 800.0;
   double canvasWidth = double.infinity;
   bool isCanvasExtended = false;
-  
+
   // Selection mode
   bool isSelectionMode = false;
   Rect? selectionRect;
   Offset? selectionStart;
   Offset? selectionEnd;
 
+  // Image/Grid toggle state
+  bool _isGridVisible = false;
+  final GridSettings _gridSettings = const GridSettings();
+
   // Scroll controller for managing large canvases
   final ScrollController _scrollController = ScrollController();
 
   // Global key for the canvas area to get correct Render object
   final GlobalKey _canvasAreaKey = GlobalKey();
-  
+
   // Key for capturing canvas as image
   final GlobalKey _canvasKey = GlobalKey();
-  
+
+  // New key for repaint boundary
+  final GlobalKey _repaintBoundaryKey = GlobalKey();
+
+  // Processing state for download button
+  bool _isProcessing = false;
+
   // Toolbar visibility control
   bool isToolbarVisible = false;
   late AnimationController _toolbarAnimationController;
@@ -62,14 +76,13 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
-    
-    _toolbarAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(
-      parent: _toolbarAnimationController,
-      curve: Curves.easeInOut,
-    ));
+
+    _toolbarAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _toolbarAnimationController,
+        curve: Curves.easeInOut,
+      ),
+    );
   }
 
   @override
@@ -90,14 +103,20 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
     });
   }
 
+  void _toggleGrid() {
+    setState(() {
+      _isGridVisible = !_isGridVisible;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.imagePath != null ? "Edit Whiteboard" : "New Whiteboard"),
-        actions: [
-          _buildMoreMenu(),
-        ],
+        title: Text(
+          widget.imagePath != null ? "Edit Whiteboard" : "New Whiteboard",
+        ),
+        actions: [_buildMoreMenu()],
       ),
       body: Stack(
         children: [
@@ -109,40 +128,55 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
                 color: Colors.grey[200], // Background color
                 width: MediaQuery.of(context).size.width, // Full width
                 child: RepaintBoundary(
-                  key: _canvasKey,
+                  key: _repaintBoundaryKey, // Added repaint boundary key here
                   child: Container(
                     key: _canvasAreaKey,
-                    color: Colors.white,
+                    color: Colors.white, // Canvas always white
                     height: canvasHeight,
                     width: canvasWidth,
-                    child: GestureDetector(
-                      onPanStart: (details) {
-                        _handleDrawStart(details);
-                      },
-                      onPanUpdate: (details) {
-                        _handleDrawUpdate(details);
-                      },
-                      onPanEnd: (_) {
-                        _handleDrawEnd();
-                      },
-                      child: CustomPaint(
-                        painter: painter.WhiteboardPainter(
-                          points: points,
-                          selectionRect: selectionRect,
-                          isSelectionMode: isSelectionMode,
+                    child: Stack(
+                      children: [
+                        // Grid widget when visible
+                        GridWidget(
+                          settings: _gridSettings,
+                          size: Size(canvasWidth, canvasHeight),
+                          isVisible: _isGridVisible,
                         ),
-                        size: Size(canvasWidth, canvasHeight),
-                      ),
+
+                        // Drawing canvas
+                        GestureDetector(
+                          onPanStart: (details) {
+                            _handleDrawStart(details);
+                          },
+                          onPanUpdate: (details) {
+                            _handleDrawUpdate(details);
+                          },
+                          onPanEnd: (_) {
+                            _handleDrawEnd();
+                          },
+                          child: CustomPaint(
+                            painter: painter.WhiteboardPainter(
+                              points: points,
+                              selectionRect: selectionRect,
+                              isSelectionMode: isSelectionMode,
+                            ),
+                            size: Size(canvasWidth, canvasHeight),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
             ),
           ),
-          
-          // Download button (always visible above toolbar)
+
+          // Download button (always visible above toolbar) - UPDATED
           Positioned(
-            bottom: isToolbarVisible ? 200 : 30, // Positioned above the toolbar or toggle button
+            bottom:
+                isToolbarVisible
+                    ? 200
+                    : 30, // Positioned above the toolbar or toggle button
             right: 20,
             child: Container(
               decoration: BoxDecoration(
@@ -157,13 +191,20 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
                 ],
               ),
               child: IconButton(
-                icon: const Icon(Icons.download),
-                onPressed: _saveToGallery,
-                tooltip: 'Download',
+                icon:
+                    _isProcessing
+                        ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : const Icon(Icons.download),
+                onPressed: _isProcessing ? null : _saveToGallery,
+                tooltip: 'Generate & Download Notes',
               ),
             ),
           ),
-          
+
           // Toolbar toggle button (always visible)
           Positioned(
             bottom: 0,
@@ -176,14 +217,16 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
                 color: Colors.white.withOpacity(0.8),
                 child: Center(
                   child: Icon(
-                    isToolbarVisible ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_up,
+                    isToolbarVisible
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
                     color: Colors.grey[700],
                   ),
                 ),
               ),
             ),
           ),
-          
+
           // Sliding toolbar
           Positioned(
             bottom: 0,
@@ -207,35 +250,45 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
 
   // Fixed drawing handlers with proper coordinate translation
   void _handleDrawStart(DragStartDetails details) {
-    if (!_canvasAreaKey.currentContext!.findRenderObject()!.paintBounds.contains(
-      _canvasAreaKey.currentContext!.findRenderObject()! as RenderBox != null
-          ? (_canvasAreaKey.currentContext!.findRenderObject()! as RenderBox)
-              .globalToLocal(details.globalPosition)
-          : details.localPosition,
-    )) {
+    if (!_canvasAreaKey.currentContext!
+        .findRenderObject()!
+        .paintBounds
+        .contains(
+          _canvasAreaKey.currentContext!.findRenderObject()! as RenderBox !=
+                  null
+              ? (_canvasAreaKey.currentContext!.findRenderObject()!
+                      as RenderBox)
+                  .globalToLocal(details.globalPosition)
+              : details.localPosition,
+        )) {
       return; // Ignore if not on canvas
     }
-    
+
     // Get the local position relative to the canvas widget
-    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
-    Offset localPosition = canvasRenderBox.globalToLocal(details.globalPosition);
-    
+    RenderBox canvasRenderBox =
+        _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+    Offset localPosition = canvasRenderBox.globalToLocal(
+      details.globalPosition,
+    );
+
     // Adjust for scroll offset
-    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
-    Offset adjustedPosition = Offset(localPosition.dx, localPosition.dy + scrollOffset);
-    
+    double scrollOffset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+    Offset adjustedPosition = Offset(
+      localPosition.dx,
+      localPosition.dy + scrollOffset,
+    );
+
     // Start new stroke
     currentStroke = [];
-    
+
     // Set appropriate color and stroke width based on mode
-    Color pointColor = currentMode == DrawingMode.eraser 
-        ? Colors.white 
-        : selectedColor;
-    
-    double width = currentMode == DrawingMode.eraser 
-        ? eraserStrokeWidth 
-        : penStrokeWidth;
-    
+    Color pointColor =
+        currentMode == DrawingMode.eraser ? Colors.white : selectedColor;
+
+    double width =
+        currentMode == DrawingMode.eraser ? eraserStrokeWidth : penStrokeWidth;
+
     setState(() {
       // Add first point to current stroke
       DrawingPoint newPoint = DrawingPoint(adjustedPosition, pointColor, width);
@@ -246,22 +299,27 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
 
   void _handleDrawUpdate(DragUpdateDetails details) {
     // Get the local position relative to the canvas widget
-    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
-    Offset localPosition = canvasRenderBox.globalToLocal(details.globalPosition);
-    
+    RenderBox canvasRenderBox =
+        _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+    Offset localPosition = canvasRenderBox.globalToLocal(
+      details.globalPosition,
+    );
+
     // Adjust for scroll offset
-    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
-    Offset adjustedPosition = Offset(localPosition.dx, localPosition.dy + scrollOffset);
-    
+    double scrollOffset =
+        _scrollController.hasClients ? _scrollController.offset : 0.0;
+    Offset adjustedPosition = Offset(
+      localPosition.dx,
+      localPosition.dy + scrollOffset,
+    );
+
     // Set appropriate color and stroke width based on mode
-    Color pointColor = currentMode == DrawingMode.eraser 
-        ? Colors.white 
-        : selectedColor;
-    
-    double width = currentMode == DrawingMode.eraser 
-        ? eraserStrokeWidth 
-        : penStrokeWidth;
-    
+    Color pointColor =
+        currentMode == DrawingMode.eraser ? Colors.white : selectedColor;
+
+    double width =
+        currentMode == DrawingMode.eraser ? eraserStrokeWidth : penStrokeWidth;
+
     setState(() {
       // Add point to current stroke and main points list
       DrawingPoint newPoint = DrawingPoint(adjustedPosition, pointColor, width);
@@ -274,7 +332,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
     setState(() {
       // Add end-of-stroke marker
       points.add(DrawingPoint.endStroke());
-      
+
       // Add current stroke to undo history
       if (currentStroke.isNotEmpty) {
         // Create a deep copy of points for undo
@@ -312,38 +370,45 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
                 onPressed: () => setState(() => currentMode = DrawingMode.pen),
                 color: selectedColor,
               ),
-              
+
               // Eraser Button
               _buildToolButton(
                 icon: Icons.auto_fix_high,
                 isSelected: currentMode == DrawingMode.eraser,
-                onPressed: () => setState(() => currentMode = DrawingMode.eraser),
+                onPressed:
+                    () => setState(() => currentMode = DrawingMode.eraser),
               ),
-              
+
               // Color Picker
               _buildColorPicker(),
-              
+
+              // Grid Toggle Button
+              ImageToggleButton(
+                onToggle: _toggleGrid,
+                isVisible: _isGridVisible,
+              ),
+
               // Undo Button
               IconButton(
                 icon: const Icon(Icons.undo),
                 onPressed: undoHistory.isEmpty ? null : _undo,
                 color: undoHistory.isEmpty ? Colors.grey : Colors.black,
               ),
-              
+
               // Redo Button
               IconButton(
                 icon: const Icon(Icons.redo),
                 onPressed: redoHistory.isEmpty ? null : _redo,
                 color: redoHistory.isEmpty ? Colors.grey : Colors.black,
               ),
-              
+
               // Clear Button
               IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: points.isEmpty ? null : _showClearConfirmation,
                 color: points.isEmpty ? Colors.grey : Colors.black,
               ),
-              
+
               // Extend Canvas Button
               _buildToolButton(
                 icon: Icons.expand_more,
@@ -353,7 +418,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
               ),
             ],
           ),
-          
+
           // Size Sliders
           if (currentMode == DrawingMode.pen)
             Slider(
@@ -364,7 +429,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
               label: penStrokeWidth.round().toString(),
               onChanged: (value) => setState(() => penStrokeWidth = value),
             ),
-          
+
           if (currentMode == DrawingMode.eraser)
             Slider(
               value: eraserStrokeWidth,
@@ -392,29 +457,30 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
             break;
         }
       },
-      itemBuilder: (context) => [
-        // Download option removed from menu
-        const PopupMenuItem(
-          value: 'save',
-          child: Row(
-            children: [
-              Icon(Icons.save),
-              SizedBox(width: 8),
-              Text('Save Locally'),
-            ],
-          ),
-        ),
-        const PopupMenuItem(
-          value: 'share',
-          child: Row(
-            children: [
-              Icon(Icons.share),
-              SizedBox(width: 8),
-              Text('Share'),
-            ],
-          ),
-        ),
-      ],
+      itemBuilder:
+          (context) => [
+            // Download option removed from menu
+            const PopupMenuItem(
+              value: 'save',
+              child: Row(
+                children: [
+                  Icon(Icons.save),
+                  SizedBox(width: 8),
+                  Text('Save Locally'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'share',
+              child: Row(
+                children: [
+                  Icon(Icons.share),
+                  SizedBox(width: 8),
+                  Text('Share'),
+                ],
+              ),
+            ),
+          ],
     );
   }
 
@@ -448,10 +514,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
     ];
 
     return PopupMenuButton<Color>(
-      icon: Icon(
-        Icons.color_lens,
-        color: selectedColor,
-      ),
+      icon: Icon(Icons.color_lens, color: selectedColor),
       itemBuilder: (context) {
         return colors.map((color) {
           return PopupMenuItem<Color>(
@@ -481,11 +544,11 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
 
   void _undo() {
     if (undoHistory.isEmpty) return;
-    
+
     setState(() {
       // Store the current state for redo before undoing
       redoHistory.add(List.from(points));
-      
+
       // Go back to the previous state from undo history
       if (undoHistory.isNotEmpty) {
         points = List.from(undoHistory.removeLast());
@@ -495,11 +558,11 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
 
   void _redo() {
     if (redoHistory.isEmpty) return;
-    
+
     setState(() {
       // Store current state in undo history
       undoHistory.add(List.from(points));
-      
+
       // Restore state from redo history
       points = List.from(redoHistory.removeLast());
     });
@@ -508,23 +571,24 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
   void _showClearConfirmation() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Clear Canvas'),
-        content: const Text('Are you sure you want to clear the canvas?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Clear Canvas'),
+            content: const Text('Are you sure you want to clear the canvas?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _clearCanvas();
+                },
+                child: const Text('Clear'),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _clearCanvas();
-            },
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -534,7 +598,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
       if (points.isNotEmpty) {
         undoHistory.add(List.from(points));
       }
-      
+
       // Clear points
       points = [];
     });
@@ -567,40 +631,57 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
     );
   }
 
-  // Convert canvas to image
-  Future<Uint8List?> _captureCanvasAsImage() async {
+  // UPDATED: Save to gallery with API processing
+  Future<void> _saveToGallery() async {
+    if (_isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
     try {
-      RenderRepaintBoundary boundary = _canvasKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
-      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      return byteData?.buffer.asUint8List();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to capture canvas: $e')),
+      // Get image bytes from the current view
+      final RenderRepaintBoundary boundary =
+          _repaintBoundaryKey.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
+      final image = await boundary.toImage(pixelRatio: 3.0);
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      final imageBytes = byteData!.buffer.asUint8List();
+
+      // Create API service
+      final apiService = ApiService(
+        baseUrl: AppConfig.baseUrl,
+        apiKey: AppConfig.apiKey,
       );
-      return null;
+
+      // Process image and generate notes
+      await apiService.processImageAndGenerateNotes(context, imageBytes);
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
     }
   }
 
-  Future<void> _saveToGallery() async {
+  Future<Uint8List?> _captureCanvasAsImage() async {
     try {
-      Uint8List? imageBytes = await _captureCanvasAsImage();
-      if (imageBytes == null) return;
-
-      // You'll need to implement image saving to gallery using image_gallery_saver
-      // For this example we'll just save it locally and show a message
-      final directory = await getApplicationDocumentsDirectory();
-      final String fileName = 'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
-      final File file = File('${directory.path}/$fileName');
-      await file.writeAsBytes(imageBytes);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Whiteboard downloaded to gallery')),
+      RenderRepaintBoundary boundary =
+          _canvasKey.currentContext!.findRenderObject()
+              as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      ByteData? byteData = await image.toByteData(
+        format: ui.ImageByteFormat.png,
       );
+      return byteData?.buffer.asUint8List();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to capture canvas: $e')));
+      return null;
     }
   }
 
@@ -610,7 +691,8 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
       if (imageBytes == null) return;
 
       final directory = await getApplicationDocumentsDirectory();
-      final String fileName = 'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
+      final String fileName =
+          'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
       final File file = File('${directory.path}/$fileName');
       await file.writeAsBytes(imageBytes);
 
@@ -618,9 +700,9 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
         SnackBar(content: Text('Whiteboard saved locally: ${file.path}')),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save locally: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to save locally: $e')));
     }
   }
 
@@ -630,19 +712,17 @@ class _WhiteboardScreenState extends State<WhiteboardScreen> with SingleTickerPr
       if (imageBytes == null) return;
 
       final directory = await getTemporaryDirectory();
-      final String fileName = 'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
+      final String fileName =
+          'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
       final File file = File('${directory.path}/$fileName');
       await file.writeAsBytes(imageBytes);
 
       // Share the file
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'My Whiteboard',
-      );
+      await Share.shareXFiles([XFile(file.path)], text: 'My Whiteboard');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to share: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to share: $e')));
     }
   }
 }
