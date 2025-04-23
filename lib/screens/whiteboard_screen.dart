@@ -1,15 +1,16 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'package:smart_board/screens/shape_utils.dart';
-import 'package:smart_board/screens/shapemeasurement.dart';
-import '../painters/whiteboard_painter.dart' as painter;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
-import '../models/drawing_point.dart';
 
+import 'package:smart_board/screens/shape_utils.dart';
+import 'package:smart_board/screens/shapemeasurement.dart';
+import 'package:smart_board/screens/geometric_tools_screen.dart';
+import '../painters/whiteboard_painter.dart' as painter;
+import '../models/drawing_point.dart';
 import '../widgets/advanced_graph_dialog.dart';
 import '../services/ai_graph_service.dart';
 import '../models/graph_settings_model.dart';
@@ -25,7 +26,7 @@ enum DrawingMode {
   pen,
   eraser,
   graph,
-  // Add other modes as needed
+  geometric, // Added a new mode for geometric tools
 }
 
 class WhiteboardScreen extends StatefulWidget {
@@ -194,7 +195,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
               ),
             ),
           ),
-          // Add a quick access button for graph plotting - only show when toolbar is hidden
+          // Graph button - only show when toolbar is hidden
           if (!isToolbarVisible)
             Positioned(
               bottom: 70,
@@ -205,6 +206,19 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 onPressed: () => _showGraphDialog(),
                 tooltip: 'Plot Graph',
                 child: const Icon(Icons.functions),
+              ),
+            ),
+          // Geometric Tools Button - only show when toolbar is hidden
+          if (!isToolbarVisible)
+            Positioned(
+              bottom: 120,
+              right: 20,
+              child: FloatingActionButton(
+                heroTag: 'geometricToolsButton',
+                mini: true,
+                onPressed: () => _navigateToGeometricTools(),
+                tooltip: 'Geometric Tools',
+                child: const Icon(Icons.architecture),
               ),
             ),
 
@@ -281,6 +295,26 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // Navigate to the Geometric Tools screen
+  void _navigateToGeometricTools() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const GeometricToolsScreen(),
+      ),
+    );
+  }
+
+  // Navigate to the Geometric Tools screen
+  void _navigateToGeometricTools() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const GeometricToolsScreen(),
       ),
     );
   }
@@ -444,13 +478,21 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 onPressed:
                     () => setState(() => currentMode = DrawingMode.eraser),
               ),
-
-              // Graph Button
+              
+              // Graph Button (Add this)
               _buildToolButton(
                 icon: Icons.functions,
                 isSelected: currentMode == DrawingMode.graph,
                 onPressed: () => _showGraphDialog(),
                 tooltip: 'Plot Graph',
+              ),
+
+              // Geometric Tools Button
+              _buildToolButton(
+                icon: Icons.architecture,
+                isSelected: currentMode == DrawingMode.geometric,
+                onPressed: () => _navigateToGeometricTools(),
+                tooltip: 'Geometric Tools',
               ),
 
               // Color Picker
@@ -482,29 +524,30 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 onPressed: points.isEmpty ? null : _showClearConfirmation,
                 color: points.isEmpty ? Colors.grey : Colors.black,
               ),
-
-              // Shapes & Measurements Button
-              IconButton(
-                icon: const Icon(Icons.crop_square),
-                tooltip: 'Shapes & Measurements',
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder:
-                          (context) => ShapeMeasurementScreen(
-                            onShapeCreated: (ShapeItem shape) {
-                              setState(() {
-                                // Add shape to your whiteboard's shape list
-                                // Example: shapes.add(shape);
-                              });
-                            },
-                          ),
+              // New button for shapes and measurements
+            IconButton(
+              icon: const Icon(Icons.crop_square),
+              tooltip: 'Shapes & Measurements',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ShapeMeasurementScreen(
+                      onShapeCreated: (ShapeItem shape) {
+                        // Here you can handle the shape data returned from the screen
+                        // For example, you could add it to a list of shapes to be rendered
+                        // on your whiteboard
+                        setState(() {
+                          // Add shape to your whiteboard's shape list
+                          // Example: shapes.add(shape);
+                        });
+                      },
                     ),
-                  );
-                },
-              ),
-
+                  ),
+                );
+              },
+            ),
+              
               // Extend Canvas Button
               _buildToolButton(
                 icon: Icons.expand_more,
@@ -796,6 +839,75 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
             ],
           ),
     );
+  }
+
+  // Add a method to plot using the enhanced settings
+  void _plotGraphWithSettings(GraphSettings settings) {
+    // Get the center of the visible canvas area
+    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+    final size = canvasRenderBox.size;
+    
+    // Calculate the center point, considering scroll position
+    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+    final center = Offset(
+      size.width / 2, 
+      (size.height / 2) + scrollOffset
+    );
+    
+    // Add current points to undo history
+    if (points.isNotEmpty) {
+      undoHistory.add(List.from(points));
+    }
+    
+    // Plot the graph using the AI service
+    List<DrawingPoint> graphPoints = AIGraphService.plotEquation(
+      settings.equation,
+      size.width * 0.8, // 80% of canvas width for the graph
+      size.height * 0.6, // 60% of canvas height for the graph
+      center,
+      selectedColor,
+      penStrokeWidth
+    );
+    
+    // Add graph points to the canvas
+    setState(() {
+      points.addAll(graphPoints);
+      // Add current stroke to undo history
+      undoHistory.add(List.from(points));
+      // Clear redo history since we added something new
+      redoHistory.clear();
+    });
+    
+    // Show a toast notification
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('AI-generated graph of "${settings.equation}" plotted'),
+        duration: const Duration(seconds: 2),
+        action: SnackBarAction(
+          label: 'OK',
+          onPressed: () {},
+        ),
+      ),
+    );
+    
+    // Scroll to ensure the graph is visible if needed
+    if (_scrollController.hasClients) {
+      // Calculate the position to scroll to (center of the graph)
+      double targetPosition = center.dy - (size.height / 2);
+      
+      // Ensure it's within bounds
+      targetPosition = targetPosition.clamp(
+        0.0, 
+        _scrollController.position.maxScrollExtent
+      );
+      
+      // Animate to the position
+      _scrollController.animateTo(
+        targetPosition,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   void _clearCanvas() {
