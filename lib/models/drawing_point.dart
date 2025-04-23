@@ -19,6 +19,11 @@ class DrawingPoint {
   });
 
   factory DrawingPoint.endStroke() {
-    return DrawingPoint(Offset.zero, Colors.transparent, 0);
+    return DrawingPoint(
+      Offset.zero,
+      Colors.transparent,
+      0,
+      isEndOfStroke: true,
+    );
   }
 }
