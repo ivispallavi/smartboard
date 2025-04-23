@@ -8,11 +8,9 @@ plugins {
 android {
     namespace = "com.example.smartboards"
     compileSdk = flutter.compileSdkVersion
-<<<<<<< HEAD
+
     ndkVersion = "27.0.12077973"
-=======
-    ndkVersion = flutter.ndkVersion
->>>>>>> 813db8c (components saparated)
+
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
