@@ -9,7 +9,7 @@ import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/drawing_point.dart';
-
+import 'package:smart_board/screens/geometric_tools_screen.dart';
 import '../widgets/advanced_graph_dialog.dart';
 import '../services/ai_graph_service.dart';
 import '../models/graph_settings_model.dart';
@@ -25,6 +25,7 @@ enum DrawingMode {
   pen,
   eraser,
   graph,
+  geometric, // Added geometric mode to the enum
   // Add other modes as needed
 }
 
@@ -285,6 +286,17 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     );
   }
 
+  // Navigate to the Geometric Tools screen
+  void _navigateToGeometricTools() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const GeometricToolsScreen(),
+      ),
+    );
+  }
+
+  // UPDATED: Fixed drawing handlers to correctly transform coordinates
   void _handleDrawStart(DragStartDetails details) {
     try {
       // Get the render box for coordinate calculation
@@ -451,6 +463,14 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 isSelected: currentMode == DrawingMode.graph,
                 onPressed: () => _showGraphDialog(),
                 tooltip: 'Plot Graph',
+              ),
+
+              // Geometric Tools Button
+              _buildToolButton(
+                icon: Icons.architecture,
+                isSelected: currentMode == DrawingMode.geometric,
+                onPressed: () => _navigateToGeometricTools(),
+                tooltip: 'Geometric Tools',
               ),
 
               // Color Picker
@@ -697,6 +717,99 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     );
   }
 
+  void _plotGraph(String equation, bool useAI) {
+    // Get the center of the visible canvas area
+    RenderBox canvasRenderBox = _canvasAreaKey.currentContext!.findRenderObject() as RenderBox;
+    final size = canvasRenderBox.size;
+    
+    // Calculate the center point, considering scroll position
+    double scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+    final center = Offset(
+      size.width / 2, 
+      (size.height / 2) + scrollOffset
+    );
+    
+    // Add current points to undo history
+    if (points.isNotEmpty) {
+      undoHistory.add(List.from(points));
+    }
+    
+    // Plot the graph using either basic or AI service
+    List<DrawingPoint> graphPoints;
+    
+    if (useAI) {
+      // Use the AI-powered service
+      graphPoints = AIGraphService.plotEquation(
+        equation,
+        size.width * 0.8, // 80% of canvas width for the graph
+        size.height * 0.6, // 60% of canvas height for the graph
+        center,
+        selectedColor,
+        penStrokeWidth
+      );
+    } else {
+      // Use the basic service
+      graphPoints = GraphService.plotEquation(
+        equation,
+        size.width * 0.8,
+        size.height * 0.6,
+        center,
+        selectedColor,
+        penStrokeWidth
+      );
+    }
+    
+    // Add graph points to the canvas
+    setState(() {
+      points.addAll(graphPoints);
+      // Add current stroke to undo history
+      undoHistory.add(List.from(points));
+      // Clear redo history since we added something new
+      redoHistory.clear();
+    });
+  }
+
+  // Removed the duplicate _showAIGraphHelp method and kept this one
+  void _showAIGraphHelp() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('AI Graph Plotting'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'The AI Graph Plotter can plot these types of equations:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            SizedBox(height: 8),
+            Text('• Basic expressions: x^2, 2*x+1'),
+            Text('• Trigonometric functions: sin(x), cos(x), tan(x)'),
+            Text('• Square roots: sqrt(x)'),
+            Text('• Absolute values: abs(x)'),
+            Text('• Polynomials: x^3-2*x^2+3*x-4'),
+            SizedBox(height: 16),
+            Text(
+              'Tips:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text('• Use * for multiplication (e.g., 2*x not 2x)'),
+            Text('• Use parentheses to group operations'),
+            Text('• Enter one equation at a time'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Method to plot using the enhanced settings
   void _plotGraphWithSettings(GraphSettings settings) {
     // Get the center of the visible canvas area
     RenderBox canvasRenderBox =
@@ -759,43 +872,6 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
         curve: Curves.easeOut,
       );
     }
-  }
-
-  void _showAIGraphHelp() {
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('AI Graph Plotting'),
-            content: const Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'The AI Graph Plotter can plot these types of equations:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 8),
-                Text('• Basic expressions: x^2, 2*x+1'),
-                Text('• Trigonometric functions: sin(x), cos(x), tan(x)'),
-                Text('• Square roots: sqrt(x)'),
-                Text('• Absolute values: abs(x)'),
-                Text('• Polynomials: x^3-2*x^2+3*x-4'),
-                SizedBox(height: 16),
-                Text('Tips:', style: TextStyle(fontWeight: FontWeight.bold)),
-                Text('• Use * for multiplication (e.g., 2*x not 2x)'),
-                Text('• Use parentheses to group operations'),
-                Text('• Enter one equation at a time'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Got it'),
-              ),
-            ],
-          ),
-    );
   }
 
   void _clearCanvas() {
