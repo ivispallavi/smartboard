@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/services.dart';  // Make sure this import is included
 
 // Class to store drawing points data
 class DrawingPoints {
@@ -20,14 +21,36 @@ class DrawingPoints {
   });
 }
 
+// Class to store geometric shapes
+class GeometricShape {
+  final String type; // 'circle', 'arc', 'line', 'angle'
+  final Map<String, dynamic> properties;
+  final Color color;
+  final double width;
+
+  GeometricShape({
+    required this.type,
+    required this.properties,
+    required this.color,
+    required this.width,
+  });
+}
+
 // Drawing Painter for rendered drawing points
 class DrawingPainter extends CustomPainter {
   final List<DrawingPoints> points;
+  final List<GeometricShape> shapes;
+  final double pixelToCmRatio; // Pixels per cm
 
-  DrawingPainter({required this.points});
+  DrawingPainter({
+    required this.points, 
+    required this.shapes,
+    this.pixelToCmRatio = 37.8, // Approximate default value (96 DPI / 2.54)
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Draw freehand points
     for (int i = 0; i < points.length; i++) {
       final point = points[i];
       
@@ -50,11 +73,213 @@ class DrawingPainter extends CustomPainter {
       
       canvas.drawPath(path, paint);
     }
+
+    // Draw geometric shapes
+    for (final shape in shapes) {
+      final paint = Paint()
+        ..color = shape.color
+        ..strokeWidth = shape.width
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+
+      if (shape.type == 'circle') {
+        final center = shape.properties['center'] as Offset;
+        final radius = shape.properties['radius'] as double;
+        canvas.drawCircle(center, radius, paint);
+        
+        // Draw radius line for reference
+        if (shape.properties['showRadius'] == true) {
+          final radiusPaint = Paint()
+            ..color = shape.color.withOpacity(0.5)
+            ..strokeWidth = 1.0
+            ..strokeCap = StrokeCap.round
+            ..style = PaintingStyle.stroke;
+          
+          canvas.drawLine(center, Offset(center.dx + radius, center.dy), radiusPaint);
+          
+          // Draw radius measurement in cm
+          final radiusCm = radius / pixelToCmRatio;
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: 'r: ${radiusCm.toStringAsFixed(1)} cm',
+              style: TextStyle(color: shape.color, fontSize: 12),
+            ),
+            textDirection: TextDirection.ltr,
+          );
+          textPainter.layout();
+          textPainter.paint(
+            canvas, 
+            Offset(center.dx + radius / 2 - textPainter.width / 2, center.dy - 15)
+          );
+        }
+      } 
+      else if (shape.type == 'arc') {
+        final center = shape.properties['center'] as Offset;
+        final radius = shape.properties['radius'] as double;
+        final startAngle = shape.properties['startAngle'] as double;
+        final endAngle = shape.properties['endAngle'] as double;
+        final showRadius = shape.properties['showRadius'] as bool? ?? false;
+        
+        // Draw the arc
+        final rect = Rect.fromCircle(center: center, radius: radius);
+        canvas.drawArc(rect, startAngle, endAngle - startAngle, false, paint);
+
+        // Draw center point
+        final centerPaint = Paint()
+          ..color = shape.color
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(center, 3.0, centerPaint);
+        
+        // Draw radius measurement in cm
+        if (showRadius) {
+          final radiusCm = radius / pixelToCmRatio;
+          final midAngle = startAngle + (endAngle - startAngle) / 2;
+          final midX = center.dx + radius * 0.7 * math.cos(midAngle);
+          final midY = center.dy + radius * 0.7 * math.sin(midAngle);
+          
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: 'r: ${radiusCm.toStringAsFixed(1)} cm',
+              style: TextStyle(color: shape.color, fontSize: 12),
+            ),
+            textDirection: TextDirection.ltr,
+          );
+          textPainter.layout();
+          textPainter.paint(
+            canvas, 
+            Offset(midX - textPainter.width / 2, midY - textPainter.height / 2)
+          );
+        }
+      }
+      else if (shape.type == 'line') {
+        final start = shape.properties['start'] as Offset;
+        final end = shape.properties['end'] as Offset;
+        canvas.drawLine(start, end, paint);
+        
+        // Draw length measurement
+        if (shape.properties['showMeasurement'] == true) {
+          final dx = end.dx - start.dx;
+          final dy = end.dy - start.dy;
+          final length = math.sqrt(dx * dx + dy * dy);
+          final lengthInCm = length / pixelToCmRatio;
+          
+          // Position the text along the line
+          final textPoint = Offset(
+            (start.dx + end.dx) / 2,
+            (start.dy + end.dy) / 2 - 10,
+          );
+          
+          final textPainter = TextPainter(
+            text: TextSpan(
+              text: '${lengthInCm.toStringAsFixed(1)} cm',
+              style: TextStyle(
+                color: shape.color,
+                fontSize: 12,
+                backgroundColor: Colors.white.withOpacity(0.7),
+              ),
+            ),
+            textDirection: TextDirection.ltr,
+            textAlign: TextAlign.center,
+          );
+          textPainter.layout();
+          
+          // Draw text background
+          final textRect = Rect.fromCenter(
+            center: textPoint,
+            width: textPainter.width + 6,
+            height: textPainter.height + 4,
+          );
+          canvas.drawRect(
+            textRect,
+            Paint()..color = Colors.white.withOpacity(0.7),
+          );
+          
+          textPainter.paint(
+            canvas, 
+            Offset(textPoint.dx - textPainter.width / 2, textPoint.dy - textPainter.height / 2)
+          );
+        }
+      } 
+      else if (shape.type == 'angle') {
+        final center = shape.properties['center'] as Offset;
+        final startAngle = shape.properties['startAngle'] as double;
+        final endAngle = shape.properties['endAngle'] as double;
+        final radius = shape.properties['radius'] as double;
+        
+        // Calculate the sweep angle ensuring it's positive
+        final sweepAngle = ((endAngle - startAngle) + 2 * math.pi) % (2 * math.pi);
+        
+        // Draw angle arms
+        final arm1End = Offset(
+          center.dx + radius * math.cos(startAngle),
+          center.dy + radius * math.sin(startAngle),
+        );
+        
+        final arm2End = Offset(
+          center.dx + radius * math.cos(endAngle),
+          center.dy + radius * math.sin(endAngle),
+        );
+        
+        // Draw arms
+        canvas.drawLine(center, arm1End, paint);
+        canvas.drawLine(center, arm2End, paint);
+        
+        // Draw arc
+        final arcPaint = Paint()
+          ..color = shape.color.withOpacity(0.3)
+          ..style = PaintingStyle.fill;
+        
+        final arcRect = Rect.fromCircle(center: center, radius: radius * 0.5);
+        canvas.drawArc(arcRect, startAngle, sweepAngle, true, arcPaint);
+        
+        // Draw arc outline
+        canvas.drawArc(
+          arcRect,
+          startAngle,
+          sweepAngle,
+          false,
+          Paint()
+            ..color = shape.color
+            ..strokeWidth = shape.width * 0.5
+            ..style = PaintingStyle.stroke,
+        );
+        
+        // Show angle measurement
+        final angleDegrees = sweepAngle * 180 / math.pi;
+        
+        // Position for the text
+        final midAngle = startAngle + sweepAngle / 2;
+        final textRadius = radius * 0.3;
+        final textPoint = Offset(
+          center.dx + textRadius * math.cos(midAngle),
+          center.dy + textRadius * math.sin(midAngle),
+        );
+        
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: '${angleDegrees.toStringAsFixed(1)}°',
+            style: TextStyle(
+              color: shape.color,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
+        );
+        textPainter.layout();
+        
+        textPainter.paint(
+          canvas, 
+          Offset(textPoint.dx - textPainter.width / 2, textPoint.dy - textPainter.height / 2)
+        );
+      }
+    }
   }
 
   @override
   bool shouldRepaint(covariant DrawingPainter oldDelegate) {
-    return oldDelegate.points != points;
+    return oldDelegate.points != points || oldDelegate.shapes != shapes;
   }
 }
 
@@ -62,10 +287,22 @@ class DrawingPainter extends CustomPainter {
 class CompassPainter extends CustomPainter {
   final double radius;
   final bool drawingMode;
+  final double? currentRadius;
+  final Offset? pivotPoint;
+  final double startAngle;
+  final double? endAngle;
+  final CompassDrawMode drawMode;
+  final double pixelToCmRatio;
 
   CompassPainter({
     required this.radius,
     required this.drawingMode,
+    this.currentRadius,
+    this.pivotPoint,
+    this.startAngle = 0,
+    this.endAngle,
+    this.drawMode = CompassDrawMode.circle,
+    this.pixelToCmRatio = 37.8, // Default pixels per cm
   });
 
   @override
@@ -76,59 +313,137 @@ class CompassPainter extends CustomPainter {
       ..strokeWidth = 2.0
       ..style = PaintingStyle.stroke;
     
-    // Draw the main compass circle (visible when not in drawing mode)
-    if (!drawingMode) {
-      canvas.drawCircle(center, radius, paint);
-    }
-    
-    // Draw the compass arms
-    final pencilPaint = Paint()
-      ..color = Colors.grey.shade800
+    // Draw the main compass body
+    // Drawing compass legs
+    final legPaint = Paint()
+      ..color = Colors.grey.shade700
       ..strokeWidth = 3.0
       ..style = PaintingStyle.stroke;
     
-    // Draw the center pivot
-    final pivotPaint = Paint()
-      ..color = Colors.red
+    // First leg
+    canvas.drawLine(
+      center,
+      Offset(center.dx - radius * 0.6, center.dy + radius * 0.8), 
+      legPaint
+    );
+    
+    // Second leg (with pencil)
+    canvas.drawLine(
+      center,
+      Offset(center.dx + radius * 0.6, center.dy + radius * 0.8), 
+      legPaint
+    );
+    
+    // Draw hinge at the top
+    final hingePaint = Paint()
+      ..color = Colors.grey.shade600
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 5.0, pivotPaint);
+    canvas.drawCircle(center, 5.0, hingePaint);
     
-    // Draw the arms
-    canvas.drawLine(
-      center,
-      Offset(center.dx, center.dy - radius), // Pencil end
-      pencilPaint,
-    );
-    
-    // Draw the second arm (perpendicular to the first one)
-    canvas.drawLine(
-      center,
-      Offset(center.dx, center.dy + radius * 0.7), // Support arm
-      Paint()
-        ..color = Colors.grey.shade600
-        ..strokeWidth = 3.0
-        ..style = PaintingStyle.stroke,
-    );
-    
-    // Draw the pencil tip
+    // Draw pencil tip
     final pencilTipPaint = Paint()
       ..color = Colors.black
       ..style = PaintingStyle.fill;
     canvas.drawCircle(
-      Offset(center.dx, center.dy - radius),
+      Offset(center.dx + radius * 0.6, center.dy + radius * 0.8),
       3.0,
       pencilTipPaint,
     );
     
-    // Draw handle
-    final handlePaint = Paint()
-      ..color = Colors.brown
+    // Draw compass point
+    final pointPaint = Paint()
+      ..color = Colors.red
       ..style = PaintingStyle.fill;
     canvas.drawCircle(
-      center,
-      10.0,
-      handlePaint,
+      Offset(center.dx - radius * 0.6, center.dy + radius * 0.8),
+      3.0,
+      pointPaint,
     );
+    
+    // Draw the actual circle/arc guide when in drawing mode
+    if (drawingMode && pivotPoint != null) {
+      final guidePaint = Paint()
+        ..color = Colors.blue.withOpacity(0.5)
+        ..strokeWidth = 1.0
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke;
+        
+      final double actualRadius = currentRadius ?? radius;
+      
+      // Draw based on the drawing mode
+      switch (drawMode) {
+        case CompassDrawMode.circle:
+          canvas.drawCircle(pivotPoint!, actualRadius, guidePaint);
+          break;
+        case CompassDrawMode.arc:
+          if (endAngle != null) {
+            final rect = Rect.fromCircle(center: pivotPoint!, radius: actualRadius);
+            canvas.drawArc(rect, startAngle, endAngle! - startAngle, false, guidePaint);
+            
+            // Draw radii at start and end points
+            final startPoint = Offset(
+              pivotPoint!.dx + actualRadius * math.cos(startAngle),
+              pivotPoint!.dy + actualRadius * math.sin(startAngle)
+            );
+            final endPoint = Offset(
+              pivotPoint!.dx + actualRadius * math.cos(endAngle!),
+              pivotPoint!.dy + actualRadius * math.sin(endAngle!)
+            );
+            
+            canvas.drawLine(pivotPoint!, startPoint, guidePaint);
+            canvas.drawLine(pivotPoint!, endPoint, guidePaint);
+          }
+          break;
+        case CompassDrawMode.halfCircle:
+          final rect = Rect.fromCircle(center: pivotPoint!, radius: actualRadius);
+          canvas.drawArc(rect, 0, math.pi, false, guidePaint);
+          break;
+      }
+      
+      // Draw center of the drawing
+      canvas.drawCircle(pivotPoint!, 4.0, pointPaint);
+      
+      // Show radius measurement
+      if (currentRadius != null) {
+        final radiusCm = currentRadius! / pixelToCmRatio;
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: 'r: ${radiusCm.toStringAsFixed(1)} cm',
+            style: TextStyle(
+              color: Colors.blue.shade800,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              backgroundColor: Colors.white.withOpacity(0.7),
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        
+        // Background for text
+        final textPoint = Offset(
+          pivotPoint!.dx, 
+          pivotPoint!.dy - actualRadius - 20
+        );
+        
+        final bgRect = Rect.fromLTWH(
+          textPoint.dx - textPainter.width / 2 - 4, 
+          textPoint.dy - 2,
+          textPainter.width + 8,
+          textPainter.height + 4,
+        );
+        
+        canvas.drawRect(
+          bgRect,
+          Paint()..color = Colors.white.withOpacity(0.7),
+        );
+        
+        textPainter.paint(
+          canvas, 
+          Offset(textPoint.dx - textPainter.width / 2, textPoint.dy)
+        );
+      }
+    }
     
     // Drawing mode indicator
     if (drawingMode) {
@@ -136,7 +451,7 @@ class CompassPainter extends CustomPainter {
         ..color = Colors.green
         ..style = PaintingStyle.fill;
       canvas.drawCircle(
-        Offset(center.dx + 15, center.dy - 15),
+        Offset(center.dx - 20, center.dy - 20),
         5.0,
         indicatorPaint,
       );
@@ -146,22 +461,30 @@ class CompassPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CompassPainter oldDelegate) {
     return oldDelegate.radius != radius || 
-           oldDelegate.drawingMode != drawingMode;
+           oldDelegate.drawingMode != drawingMode ||
+           oldDelegate.currentRadius != currentRadius ||
+           oldDelegate.pivotPoint != pivotPoint ||
+           oldDelegate.startAngle != startAngle ||
+           oldDelegate.endAngle != endAngle ||
+           oldDelegate.drawMode != drawMode;
   }
 }
-
 // Protractor Painter
 class ProtractorPainter extends CustomPainter {
   final double size;
   final double measuredAngle;
   final bool isDrawingAngle;
   final Offset? angleStartPoint;
+  final Offset? angleEndPoint;
+  final bool snapAngles;
 
   ProtractorPainter({
     required this.size,
     required this.measuredAngle,
     required this.isDrawingAngle,
     required this.angleStartPoint,
+    this.angleEndPoint,
+    this.snapAngles = false,
   });
 
   @override
@@ -183,13 +506,19 @@ class ProtractorPainter extends CustomPainter {
     );
     canvas.drawArc(rect, 0, math.pi, false, paint);
     
+    // Fill with transparent color
+    final fillPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.1)
+      ..style = PaintingStyle.fill;
+    canvas.drawArc(rect, 0, math.pi, true, fillPaint);
+    
     // Draw the baseline
     canvas.drawLine(
       Offset(0, center.dy),
       Offset(this.size * 2, center.dy),
       paint,
     );
-    
+
     // Draw the angle markings every 10 degrees
     final textPainter = TextPainter(
       textDirection: TextDirection.ltr,
@@ -234,7 +563,7 @@ class ProtractorPainter extends CustomPainter {
     final centerPaint = Paint()
       ..color = Colors.red
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, 3.0, centerPaint);
+    canvas.drawCircle(center, 4.0, centerPaint);
     
     // Draw the measured angle if in angle drawing mode
     if (isDrawingAngle && measuredAngle > 0) {
@@ -280,6 +609,16 @@ class ProtractorPainter extends CustomPainter {
       final textY = center.dy - textDistance * math.sin(textAngle) - textPainter.height / 2;
       
       textPainter.paint(canvas, Offset(textX, textY));
+      
+      // If we have both start and end points in active drawing mode, show angle construction lines
+      if (angleStartPoint != null && angleEndPoint != null) {
+        final constructionPaint = Paint()
+          ..color = Colors.orange
+          ..strokeWidth = 2.0
+          ..style = PaintingStyle.stroke;
+          
+        canvas.drawLine(center, angleEndPoint!, constructionPaint);
+      }
     }
   }
 
@@ -287,7 +626,10 @@ class ProtractorPainter extends CustomPainter {
   bool shouldRepaint(covariant ProtractorPainter oldDelegate) {
     return oldDelegate.size != size ||
            oldDelegate.measuredAngle != measuredAngle ||
-           oldDelegate.isDrawingAngle != isDrawingAngle;
+           oldDelegate.isDrawingAngle != isDrawingAngle ||
+           oldDelegate.angleStartPoint != angleStartPoint ||
+           oldDelegate.angleEndPoint != angleEndPoint ||
+           oldDelegate.snapAngles != snapAngles;
   }
 }
 
@@ -297,22 +639,26 @@ class RulerPainter extends CustomPainter {
   final double cmToPixelRatio;
   final bool isDrawingLine;
   final Offset? lineStartPoint;
+  final Offset? lineEndPoint;
+  final bool snapAngles;
 
   RulerPainter({
     required this.length,
     required this.cmToPixelRatio,
     required this.isDrawingLine,
     required this.lineStartPoint,
+    this.lineEndPoint,
+    this.snapAngles = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.brown.withOpacity(0.7)
+      ..color = Colors.brown.shade300
       ..style = PaintingStyle.fill;
     
     // Draw the ruler base
-    final rulerRect = Rect.fromLTWH(0, 0, length, 40);
+    final rulerRect = Rect.fromLTWH(0, 0, length, 50);
     canvas.drawRect(rulerRect, paint);
     
     // Draw the ruler border
@@ -331,8 +677,8 @@ class RulerPainter extends CustomPainter {
       textDirection: TextDirection.ltr,
     );
     
-    // Calculate cm and mm markings based on the ratio
-    final totalCm = (length / cmToPixelRatio).floor();
+    // Calculate total cm based on the ratio
+    final totalCm = (length / cmToPixelRatio).ceil();
     
     for (int cm = 0; cm <= totalCm; cm++) {
       final x = cm * cmToPixelRatio;
@@ -340,7 +686,7 @@ class RulerPainter extends CustomPainter {
       // Draw cm marking (longer line)
       canvas.drawLine(
         Offset(x, 0),
-        Offset(x, 15),
+        Offset(x, 20),
         markingPaint,
       );
       
@@ -353,13 +699,13 @@ class RulerPainter extends CustomPainter {
         ),
       );
       textPainter.layout();
-      textPainter.paint(canvas, Offset(x - textPainter.width / 2, 20));
+      textPainter.paint(canvas, Offset(x - textPainter.width / 2, 25));
       
       // Draw mm markings (shorter lines)
       if (cm < totalCm) {
         for (int mm = 1; mm < 10; mm++) {
           final mmX = x + mm * cmToPixelRatio / 10;
-          final lineHeight = mm == 5 ? 10.0 : 5.0; // Middle marking is longer
+          final lineHeight = mm == 5 ? 12.0 : 7.0; // Middle marking is longer
           
           canvas.drawLine(
             Offset(mmX, 0),
@@ -370,16 +716,108 @@ class RulerPainter extends CustomPainter {
       }
     }
     
+    // Draw "cm" unit label
+    textPainter.text = TextSpan(
+      text: 'cm',
+      style: TextStyle(
+        color: Colors.black,
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, Offset(length - textPainter.width - 5, 35));
+    
     // Draw the drawing mode indicator
     if (isDrawingLine) {
       final indicatorPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.fill;
       canvas.drawCircle(
-        Offset(10, 10),
+        Offset(15, 15),
         5.0,
         indicatorPaint,
       );
+      
+      // Show measurement line if we have start and end points
+      if (lineStartPoint != null && lineEndPoint != null) {
+        final linePaint = Paint()
+          ..color = Colors.red
+          ..strokeWidth = 2.0
+          ..style = PaintingStyle.stroke;
+        
+        canvas.drawLine(lineStartPoint!, lineEndPoint!, linePaint);
+        
+        // Calculate length
+        final dx = lineEndPoint!.dx - lineStartPoint!.dx;
+        final dy = lineEndPoint!.dy - lineStartPoint!.dy;
+        final length = math.sqrt(dx * dx + dy * dy);
+        final lengthInCm = length / cmToPixelRatio;
+        
+        // Calculate angle for snapping if enabled
+        double angle = math.atan2(dy, dx);
+        if (snapAngles) {
+          // Snap to 0, 45, 90, 135, etc. degrees
+          final snapAngle = (angle / (math.pi / 4)).round() * (math.pi / 4);
+          
+          // If snapped, recalculate end point
+          if (snapAngle != angle) {
+            angle = snapAngle;
+            final snappedEndX = lineStartPoint!.dx + length * math.cos(angle);
+            final snappedEndY = lineStartPoint!.dy + length * math.sin(angle);
+            
+            // Draw the snapped line with a different style
+            final snappedPaint = Paint()
+              ..color = Colors.green
+              ..strokeWidth = 2.0
+              ..style = PaintingStyle.stroke;
+            
+            canvas.drawLine(
+              lineStartPoint!, 
+              Offset(snappedEndX, snappedEndY),
+              snappedPaint,
+            );
+          }
+        }
+        
+        // Show measurement
+        final textPoint = Offset(
+          (lineStartPoint!.dx + lineEndPoint!.dx) / 2,
+          (lineStartPoint!.dy + lineEndPoint!.dy) / 2 - 15,
+        );
+        
+        final angleText = snapAngles
+            ? '${(angle * 180 / math.pi).round()}°'
+            : '';
+        
+        textPainter.text = TextSpan(
+          text: '${lengthInCm.toStringAsFixed(1)} cm $angleText',
+          style: TextStyle(
+            color: Colors.red,
+            fontSize: 12,
+            backgroundColor: Colors.white.withOpacity(0.7),
+          ),
+        );
+        textPainter.layout();
+        
+        // Draw background for text
+        final bgRect = Rect.fromLTWH(
+          textPoint.dx - textPainter.width / 2 - 4,
+          textPoint.dy - 2,
+          textPainter.width + 8,
+          textPainter.height + 4,
+        );
+        
+        canvas.drawRect(
+          bgRect,
+          Paint()..color = Colors.white.withOpacity(0.7),
+        );
+        
+        textPainter.paint(
+          canvas, 
+          Offset(textPoint.dx - textPainter.width / 2, textPoint.dy)
+        );
+      }
     }
   }
 
@@ -387,168 +825,24 @@ class RulerPainter extends CustomPainter {
   bool shouldRepaint(covariant RulerPainter oldDelegate) {
     return oldDelegate.length != length ||
            oldDelegate.cmToPixelRatio != cmToPixelRatio ||
-           oldDelegate.isDrawingLine != isDrawingLine;
+           oldDelegate.isDrawingLine != isDrawingLine ||
+           oldDelegate.lineStartPoint != lineStartPoint ||
+           oldDelegate.lineEndPoint != lineEndPoint ||
+           oldDelegate.snapAngles != snapAngles;
   }
 }
 
-// Set Square Painter
-class SetSquarePainter extends CustomPainter {
-  final double size;
-  final double cmToPixelRatio;
-
-  SetSquarePainter({
-    required this.size,
-    required this.cmToPixelRatio,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.green.withOpacity(0.5)
-      ..style = PaintingStyle.fill;
-    
-    // Draw 45-degree set square (right triangle)
-    final path = Path();
-    path.moveTo(0, 0);
-    path.lineTo(this.size, this.size);
-    path.lineTo(0, this.size);
-    path.close();
-    
-    canvas.drawPath(path, paint);
-    
-    // Draw the border
-    final borderPaint = Paint()
-      ..color = Colors.green.shade800
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-    canvas.drawPath(path, borderPaint);
-    
-    // Draw measurement markings
-    final markingPaint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 1.0;
-    
-    // Helper method to draw markings along a line
-    void drawMarkingsAlongLine(Offset start, Offset end, int divisions) {
-      final dx = (end.dx - start.dx) / divisions;
-      final dy = (end.dy - start.dy) / divisions;
-      
-      for (int i = 0; i <= divisions; i++) {
-        final x = start.dx + dx * i;
-        final y = start.dy + dy * i;
-        
-        final markLength = i % 5 == 0 ? 8.0 : 4.0;
-        final angle = math.atan2(dy, dx) + math.pi/2;
-        
-        canvas.drawLine(
-          Offset(x, y),
-          Offset(
-            x + markLength * math.cos(angle),
-            y + markLength * math.sin(angle),
-          ),
-          markingPaint,
-        );
-        
-        // Add label for major divisions
-        if (i % 5 == 0) {
-          final textPainter = TextPainter(
-            textDirection: TextDirection.ltr,
-            text: TextSpan(
-              text: '${i ~/ 5}',
-              style: TextStyle(
-                color: Colors.black,
-                fontSize: 10,
-              ),
-            ),
-          );
-          textPainter.layout();
-          
-          textPainter.paint(
-            canvas, 
-            Offset(
-              x + 12 * math.cos(angle) - textPainter.width / 2,
-              y + 12 * math.sin(angle) - textPainter.height / 2,
-            ),
-          );
-        }
-      }
-    }
-    
-    // Draw markings on the hypotenuse
-    final hypotenuseDivisions = (this.size / cmToPixelRatio * 1.414).floor() * 5;
-    drawMarkingsAlongLine(
-      Offset(0, 0), 
-      Offset(this.size, this.size),
-      hypotenuseDivisions,
-    );
-    
-    // Draw markings on the vertical edge
-    final verticalDivisions = (this.size / cmToPixelRatio).floor() * 5;
-    drawMarkingsAlongLine(
-      Offset(0, 0), 
-      Offset(0, this.size),
-      verticalDivisions,
-    );
-    
-    // Draw markings on the horizontal edge
-    final horizontalDivisions = (this.size / cmToPixelRatio).floor() * 5;
-    drawMarkingsAlongLine(
-      Offset(0, this.size), 
-      Offset(this.size, this.size),
-      horizontalDivisions,
-    );
-    
-    // Draw angle markers
-    final angleTextPainter = TextPainter(
-      textDirection: TextDirection.ltr,
-    );
-    
-    // 45° angle marker
-    angleTextPainter.text = TextSpan(
-      text: '45°',
-      style: TextStyle(
-        color: Colors.red,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-    angleTextPainter.layout();
-    angleTextPainter.paint(canvas, Offset(this.size * 0.15, this.size * 0.15));
-    
-    // 90° angle marker
-    angleTextPainter.text = TextSpan(
-      text: '90°',
-      style: TextStyle(
-        color: Colors.red,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-    angleTextPainter.layout();
-    angleTextPainter.paint(canvas, Offset(this.size * 0.08, this.size * 0.85));
-    
-    // 45° angle marker (top right)
-    angleTextPainter.text = TextSpan(
-      text: '45°',
-      style: TextStyle(
-        color: Colors.red,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-      ),
-    );
-    angleTextPainter.layout();
-    angleTextPainter.paint(canvas, Offset(this.size * 0.85, this.size * 0.85));
-  }
-
-  @override
-  bool shouldRepaint(covariant SetSquarePainter oldDelegate) {
-    return oldDelegate.size != size ||
-           oldDelegate.cmToPixelRatio != cmToPixelRatio;
-  }
+// Enum for compass drawing modes
+enum CompassDrawMode {
+  circle,
+  arc,
+  halfCircle,
 }
 
+// Main Screen Widget -
 // Main Screen Widget
 class GeometricToolsScreen extends StatefulWidget {
+  // Changed from const to regular constructor
   const GeometricToolsScreen({Key? key}) : super(key: key);
 
   @override
@@ -556,631 +850,894 @@ class GeometricToolsScreen extends StatefulWidget {
 }
 
 class _GeometricToolsScreenState extends State<GeometricToolsScreen> {
-  // Tool selection
-  String selectedTool = 'none';
-  GlobalKey canvasKey = GlobalKey();
+  // Drawing state
+  List<DrawingPoints> points = [];
+  List<GeometricShape> shapes = [];
   
-  // Tool properties
-  double scale = 1.0;
-  double rotation = 0.0;
-  Offset position = Offset.zero;
+  // Current drawing properties
+  Color selectedColor = Colors.black;
+  double strokeWidth = 3.0;
   
-  // For rotation control
-  bool isRotating = false;
-  Offset? rotationStartPosition;
-  double startRotation = 0.0;
+  // Tools state
+  String selectedTool = 'pen'; // 'pen', 'compass', 'protractor', 'ruler'
+  bool isDrawing = false;
   
-  // For compass
+  // Compass properties
   double compassRadius = 100.0;
-  bool drawingWithCompass = false;
-  Offset? compassCenter;
-  Offset? compassPencilPosition; // Position of the pencil end
+  bool compassDrawingMode = false;
+  Offset? compassPivotPoint;
+  double compassCurrentRadius = 0.0;
+  double compassStartAngle = 0.0;
+  double? compassEndAngle;
+  CompassDrawMode compassDrawMode = CompassDrawMode.circle;
   
-  // For protractor
+  // Protractor properties
   double protractorSize = 150.0;
   double measuredAngle = 0.0;
   bool isDrawingAngle = false;
   Offset? angleStartPoint;
+  Offset? angleEndPoint;
   
-  // For ruler
-  double rulerLength = 200.0;
-  double cmToPixelRatio = 10.0; // 10 pixels = 1 cm
+  // Ruler properties
+  double rulerLength = 300.0;
+  double pixelToCmRatio = 37.8; // Approximate default value (96 DPI / 2.54)
   bool isDrawingLine = false;
   Offset? lineStartPoint;
+  Offset? lineEndPoint;
+  bool snapAngles = false;
   
-  // For set square
-  double setSquareSize = 150.0;
+  // Tool positions
+  Offset compassPosition = Offset(100, 100);
+  Offset protractorPosition = Offset(200, 300);
+  Offset rulerPosition = Offset(100, 400);
   
-  // Drawing properties
-  List<DrawingPoints> points = [];
-  Color selectedColor = Colors.black;
-  double strokeWidth = 3.0;
-
-  // Zoom settings
-  final double zoomFactor = 0.1; // 10% zoom increment/decrement
-  final double minZoom = 0.5;    // 50% minimum zoom
-  final double maxZoom = 2.0;    // 200% maximum zoom
-  Offset? lastZoomCenter;        // Track the zoom center for mouse wheel zoom
+  // Pan controllers for tools
+  Offset panStart = Offset.zero;
   
-  // Gesture handling flags
-  bool isDragging = false;
-  bool isToolPressed = false;
-  bool isModifierKeyPressed = false; // For Ctrl key to rotate
-  bool isDrawing = false; // Flag to track drawing state
-
-  @override
-  void initState() {
-    super.initState();
-    // Initialize position to be center of the screen
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Calculate the center position of the screen
-      final screenWidth = MediaQuery.of(context).size.width;
-      final screenHeight = MediaQuery.of(context).size.height - 160; // Accounting for AppBar and tool bar
-      setState(() {
-        position = Offset(screenWidth / 2, screenHeight / 2);
-      });
-    });
-  }
-
+  // Global key for capturing screenshot
+  final GlobalKey canvasKey = GlobalKey();
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Geometric Tools'),
+        title: Text('Geometric Drawing Tools'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.save),
+            icon: Icon(Icons.save),
             onPressed: _saveCanvas,
-            tooltip: 'Save',
+            tooltip: 'Save Drawing',
           ),
           IconButton(
-            icon: const Icon(Icons.clear),
+            icon: Icon(Icons.delete),
             onPressed: _clearCanvas,
-            tooltip: 'Clear',
+            tooltip: 'Clear Canvas',
           ),
         ],
       ),
       body: Column(
         children: [
-          Expanded(
-            child: Stack(
+          // Tool Selection Bar
+          Container(
+            height: 60,
+            color: Colors.grey.shade200,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // Drawing canvas with tools
-                RepaintBoundary(
-                  key: canvasKey,
-                  child: Listener(
-                    onPointerSignal: _handlePointerSignal,
-                    onPointerDown: _handlePointerDown,
-                    onPointerUp: _handlePointerUp,
-                    child: GestureDetector(
-                      onScaleStart: _onScaleStart,
-                      onScaleUpdate: _onScaleUpdate,
-                      onScaleEnd: _onScaleEnd,
-                      child: Stack(
-                        children: [
-                          // Drawing canvas
-                          CustomPaint(
-                            size: Size.infinite,
-                            painter: DrawingPainter(points: points),
-                          ),
-                          
-                          // Active tool (with fixed dragging)
-                          if (selectedTool == 'compass') _buildCompassTool(),
-                          if (selectedTool == 'protractor') _buildProtractorTool(),
-                          if (selectedTool == 'ruler') _buildRulerTool(),
-                          if (selectedTool == 'setSquare') _buildSetSquareTool(),
-                        ],
-                      ),
-                    ),
+                _buildToolButton('pen', Icons.edit, 'Free Drawing'),
+                _buildToolButton('compass', Icons.compass_calibration, 'Compass'),
+                _buildToolButton('protractor', Icons.architecture, 'Protractor'),
+                _buildToolButton('ruler', Icons.straighten, 'Ruler'),
+                // Color Picker
+                IconButton(
+                  icon: Icon(Icons.color_lens, color: selectedColor),
+                  onPressed: _showColorPicker,
+                  tooltip: 'Change Color',
+                ),
+                // Stroke Width Slider
+                Container(
+                  width: 150,
+                  child: Slider(
+                    value: strokeWidth,
+                    min: 1.0,
+                    max: 10.0,
+                    divisions: 9,
+                    label: strokeWidth.round().toString(),
+                    onChanged: (value) {
+                      setState(() {
+                        strokeWidth = value;
+                      });
+                    },
                   ),
                 ),
-                
-                // Show instructions when a geometric tool is selected
-                if (_isGeometricTool(selectedTool))
-                  Positioned(
-                    top: 16,
-                    left: 16,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white70,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Drag: Touch and move',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Rotate: Hold Ctrl + Drag',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Zoom: Pinch or Mouse wheel',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                          // Tool-specific instructions
-                          if (selectedTool == 'compass')
-                            Text(
-                              'Double-tap: Toggle drawing mode',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                            ),
-                        ],
-                      ),
+                // Snap angles toggle
+                Row(
+                  children: [
+                    Text('Snap Angles'),
+                    Switch(
+                      value: snapAngles,
+                      onChanged: (value) {
+                        setState(() {
+                          snapAngles = value;
+                        });
+                      },
                     ),
-                  ),
-                
-                // Add zoom controls - only show when a tool is selected
-                if (_isGeometricTool(selectedTool))
-                  Positioned(
-                    top: 16,
-                    right: 16,
-                    child: Column(
-                      children: [
-                        _buildZoomButton(
-                          icon: Icons.add,
-                          onPressed: () => _zoomIn(null),
-                          tooltip: 'Zoom In',
-                        ),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white70,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '${(scale * 100).toInt()}%',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        _buildZoomButton(
-                          icon: Icons.remove,
-                          onPressed: () => _zoomOut(null),
-                          tooltip: 'Zoom Out',
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
+                ),
               ],
             ),
           ),
           
-          // Tool selection bar
-          Container(
-            height: 80,
-            color: Colors.grey[200],
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.all(8),
+          // Main Drawing Canvas
+          Expanded(
+            child: Stack(
               children: [
-                _buildToolButton('compass', 'Compass', Icons.radio_button_unchecked),
-                _buildToolButton('protractor', 'Protractor', Icons.architecture),
-                _buildToolButton('ruler', 'Ruler', Icons.straighten),
-                _buildToolButton('setSquare', 'Set Square', Icons.change_history),
-                _buildToolButton('pencil', 'Pencil', Icons.edit),
-                _buildToolButton('eraser', 'Eraser', Icons.auto_fix_high),
-                _buildToolButton('none', 'Select', Icons.pan_tool),
+                // Background
+                Container(
+                  color: Colors.white,
+                ),
+                
+                // Drawing Canvas
+                RepaintBoundary(
+                  key: canvasKey,
+                  child: GestureDetector(
+                    onPanStart: _handlePanStart,
+                    onPanUpdate: _handlePanUpdate,
+                    onPanEnd: _handlePanEnd,
+                    child: CustomPaint(
+                      painter: DrawingPainter(
+                        points: points,
+                        shapes: shapes,
+                        pixelToCmRatio: pixelToCmRatio,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  ),
+                ),
+                
+                // Compass Tool
+                if (selectedTool == 'compass')
+                  Positioned(
+                    left: compassPosition.dx - compassRadius,
+                    top: compassPosition.dy - compassRadius,
+                    child: GestureDetector(
+                      onPanStart: (details) {
+                        panStart = details.localPosition;
+                      },
+                      onPanUpdate: (details) {
+                        setState(() {
+                          if (!compassDrawingMode) {
+                            compassPosition = Offset(
+                              compassPosition.dx + details.localPosition.dx - panStart.dx,
+                              compassPosition.dy + details.localPosition.dy - panStart.dy,
+                            );
+                          } else if (compassPivotPoint != null) {
+                            // Update compass radius when drawing
+                            final dx = details.globalPosition.dx - compassPivotPoint!.dx;
+                            final dy = details.globalPosition.dy - compassPivotPoint!.dy;
+                            compassCurrentRadius = math.sqrt(dx * dx + dy * dy);
+                            
+                            if (compassDrawMode == CompassDrawMode.arc) {
+                              compassEndAngle = math.atan2(dy, dx);
+                            }
+                          }
+                        });
+                      },
+                      onTap: () {
+                        if (!compassDrawingMode) {
+                          // Enter drawing mode
+                          setState(() {
+                            compassDrawingMode = true;
+                            compassPivotPoint = null;
+                          });
+                        } else if (compassPivotPoint == null) {
+                          // Set pivot point
+                          setState(() {
+                            compassPivotPoint = Offset(
+                              compassPosition.dx,
+                              compassPosition.dy,
+                            );
+                            compassCurrentRadius = compassRadius;
+                            
+                            // For arc mode, set starting angle
+                            if (compassDrawMode == CompassDrawMode.arc) {
+                              compassStartAngle = 0; // Default starting angle
+                            }
+                          });
+                        } else {
+                          // Finalize drawing
+                          _finalizeCompassDrawing();
+                        }
+                      },
+                      onDoubleTap: () {
+                        setState(() {
+                          // Toggle drawing mode
+                          if (compassDrawingMode) {
+                            compassDrawingMode = false;
+                            compassPivotPoint = null;
+                          } else {
+                            // Toggle drawing mode
+                            switch (compassDrawMode) {
+                              case CompassDrawMode.circle:
+                                compassDrawMode = CompassDrawMode.arc;
+                                break;
+                              case CompassDrawMode.arc:
+                                compassDrawMode = CompassDrawMode.halfCircle;
+                                break;
+                              case CompassDrawMode.halfCircle:
+                                compassDrawMode = CompassDrawMode.circle;
+                                break;
+                            }
+                          }
+                        });
+                      },
+                      onLongPress: () {
+                        // Adjust compass radius
+                        _showRadiusDialog();
+                      },
+                      child: CustomPaint(
+                        painter: CompassPainter(
+                          radius: compassRadius,
+                          drawingMode: compassDrawingMode,
+                          currentRadius: compassCurrentRadius,
+                          pivotPoint: compassPivotPoint,
+                          startAngle: compassStartAngle,
+                          endAngle: compassEndAngle,
+                          drawMode: compassDrawMode,
+                          pixelToCmRatio: pixelToCmRatio,
+                        ),
+                        size: Size(compassRadius * 2, compassRadius * 2),
+                      ),
+                    ),
+                  ),
+                
+                // Protractor Tool
+                if (selectedTool == 'protractor')
+                  Positioned(
+                    left: protractorPosition.dx - protractorSize,
+                    top: protractorPosition.dy - protractorSize / 2,
+                    child: GestureDetector(
+                      onPanStart: (details) {
+                        panStart = details.localPosition;
+                      },
+                      onPanUpdate: (details) {
+                        setState(() {
+                          if (!isDrawingAngle) {
+                            protractorPosition = Offset(
+                              protractorPosition.dx + details.localPosition.dx - panStart.dx,
+                              protractorPosition.dy + details.localPosition.dy - panStart.dy,
+                            );
+                          } else if (angleStartPoint != null) {
+                            // Calculate angle with baseline
+                            final dx = details.globalPosition.dx - protractorPosition.dx;
+                            final dy = protractorPosition.dy - details.globalPosition.dy;
+                            
+                            measuredAngle = math.atan2(dy, dx) * 180 / math.pi;
+                            if (measuredAngle < 0) measuredAngle += 360;
+                            
+                            // Constrain to 0-180 degrees for a protractor
+                            if (measuredAngle > 180) measuredAngle = 180;
+                            
+                            angleEndPoint = details.globalPosition;
+                          }
+                        });
+                      },
+                      onTap: () {
+                        if (!isDrawingAngle) {
+                          // Enter angle drawing mode
+                          setState(() {
+                            isDrawingAngle = true;
+                            angleStartPoint = null;
+                          });
+                        } else if (angleStartPoint == null) {
+                          // Set first point of angle
+                          setState(() {
+                            angleStartPoint = protractorPosition;
+                          });
+                        } else {
+                          // Finalize angle
+                          _finalizeAngleMeasurement();
+                        }
+                      },
+                      onDoubleTap: () {
+                        setState(() {
+                          // Toggle drawing mode
+                          isDrawingAngle = !isDrawingAngle;
+                          angleStartPoint = null;
+                          angleEndPoint = null;
+                        });
+                      },
+                      child: CustomPaint(
+                        painter: ProtractorPainter(
+                          size: protractorSize,
+                          measuredAngle: measuredAngle,
+                          isDrawingAngle: isDrawingAngle,
+                          angleStartPoint: angleStartPoint,
+                          angleEndPoint: angleEndPoint,
+                          snapAngles: snapAngles,
+                        ),
+                        size: Size(protractorSize * 2, protractorSize),
+                      ),
+                    ),
+                  ),
+                
+                // Ruler Tool
+                if (selectedTool == 'ruler')
+                  Positioned(
+                    left: rulerPosition.dx,
+                    top: rulerPosition.dy,
+                    child: Transform.rotate(
+                      angle: 0, // Can be enhanced to allow rotation
+                      child: GestureDetector(
+                        onPanStart: (details) {
+                          panStart = details.localPosition;
+                        },
+                        onPanUpdate: (details) {
+                          setState(() {
+                            if (!isDrawingLine) {
+                              rulerPosition = Offset(
+                                rulerPosition.dx + details.localPosition.dx - panStart.dx,
+                                rulerPosition.dy + details.localPosition.dy - panStart.dy,
+                              );
+                            } else if (lineStartPoint != null) {
+                              lineEndPoint = details.globalPosition;
+                            }
+                          });
+                        },
+                        onTapUp: (TapUpDetails tapDetails) {
+  if (!isDrawingLine) {
+    // Enter line drawing mode
+    setState(() {
+      isDrawingLine = true;
+      lineStartPoint = null;
+    });
+  } else if (lineStartPoint == null) {
+    // Set first point of line
+    setState(() {
+      lineStartPoint = tapDetails.globalPosition;
+    });
+  } else {
+    // Finalize line
+    _finalizeLineMeasurement();
+  }
+},
+                        onDoubleTap: () {
+                          setState(() {
+                            // Toggle drawing mode
+                            isDrawingLine = !isDrawingLine;
+                            lineStartPoint = null;
+                            lineEndPoint = null;
+                          });
+                        },
+                        onLongPress: () {
+                          // Adjust ruler settings
+                          _showRulerSettingsDialog();
+                        },
+                        child: CustomPaint(
+                          painter: RulerPainter(
+                            length: rulerLength,
+                            cmToPixelRatio: pixelToCmRatio,
+                            isDrawingLine: isDrawingLine,
+                            lineStartPoint: lineStartPoint,
+                            lineEndPoint: lineEndPoint,
+                            snapAngles: snapAngles,
+                          ),
+                          size: Size(rulerLength, 50),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         ],
       ),
+      bottomNavigationBar: BottomAppBar(
+        child: Container(
+          height: 50,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text('Selected Tool: ${selectedTool.toUpperCase()}'),
+              SizedBox(width: 20),
+              if (selectedTool == 'compass') 
+                Text('Double-tap to change mode: ${compassDrawMode.toString().split('.').last}'),
+              if (selectedTool == 'protractor')
+                Text('Angle: ${measuredAngle.toStringAsFixed(1)}°'),
+              if (selectedTool == 'ruler')
+                Text('Ruler Length: ${(rulerLength / pixelToCmRatio).toStringAsFixed(1)} cm'),
+            ],
+          ),
+        ),
+      ),
     );
   }
-
-  // Improved pointer handling for key modifiers
-  void _handlePointerDown(PointerDownEvent event) {
-    // Check for modifier keys (Ctrl for rotation)
-    isModifierKeyPressed = event.down;
-    
-    if (isModifierKeyPressed && _isGeometricTool(selectedTool)) {
-      setState(() {
-        isRotating = true;
-        rotationStartPosition = event.position;
-        startRotation = rotation;
-      });
-    }
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    isModifierKeyPressed = false;
-    if (isRotating) {
-      setState(() {
-        isRotating = false;
-        rotationStartPosition = null;
-      });
-    }
-    
-    // End drawing if drawing with pencil or eraser
-    if (isDrawing) {
-      setState(() {
-        isDrawing = false;
-      });
-    }
-  }
-
-  // Handle mouse wheel events for zooming
-  void _handlePointerSignal(PointerSignalEvent event) {
-    if (event is PointerScrollEvent && _isGeometricTool(selectedTool)) {
-      // Check if Ctrl key is pressed - for rotation
-      if (isModifierKeyPressed) {
-        // Rotate with Ctrl + mouse wheel
+  
+  // Build a tool button with icon and tooltip
+  Widget _buildToolButton(String tool, IconData icon, String tooltip) {
+    return IconButton(
+      icon: Icon(
+        icon,
+        color: selectedTool == tool ? Colors.blue : Colors.grey,
+        size: 30,
+      ),
+      onPressed: () {
         setState(() {
-          rotation += (event.scrollDelta.dy > 0 ? -0.05 : 0.05);
+          selectedTool = tool;
+          // Reset all drawing modes when switching tools
+          compassDrawingMode = false;
+          isDrawingAngle = false;
+          isDrawingLine = false;
+          isDrawing = false;
         });
-      } else {
-        // Normal mouse wheel handles zoom
-        setState(() {
-          lastZoomCenter = event.position;
-          if (event.scrollDelta.dy < 0) {
-            _zoomIn(event.position);
-          } else {
-            _zoomOut(event.position);
-          }
-        });
-      }
-    }
+      },
+      tooltip: tooltip,
+    );
   }
-
-  // Scale gesture handlers for pinch-to-zoom and also handle drawing
-  void _onScaleStart(ScaleStartDetails details) {
-    if (_isGeometricTool(selectedTool)) {
-      // Store initial scale and rotation values
-      setState(() {
-        lastZoomCenter = details.focalPoint;
-        isDragging = true;
-      });
-    } else if (selectedTool == 'pencil' || selectedTool == 'eraser') {
-      // For drawing with pencil
-      _startDrawingAt(details.focalPoint);
-    }
-  }
-
-  void _onScaleUpdate(ScaleUpdateDetails details) {
-    if (_isGeometricTool(selectedTool)) {
-      setState(() {
-        // Handle pinch zoom
-        if (details.scale != 1.0) {
-          double newScale = scale * details.scale;
-          newScale = newScale.clamp(minZoom, maxZoom);
-          
-          // If scale changed, update position to zoom toward focal point
-          if (newScale != scale) {
-            // Calculate the vector from zoom center to position
-            Offset positionVector = position - details.focalPoint;
-            // Scale this vector by the zoom factor ratio
-            positionVector = positionVector * (newScale / scale);
-            // Update position
-            position = details.focalPoint + positionVector;
-            // Update scale
-            scale = newScale;
-          }
-        }
-        
-        // Handle rotation if modifier key is pressed or two-finger rotation
-        if (isModifierKeyPressed && details.rotation != 0.0) {
-          rotation += details.rotation;
-        }
-        
-        // Handle movement if not rotating and not doing a multi-finger gesture
-        if (!isRotating && details.scale == 1.0 && details.rotation == 0.0) {
-          position += details.focalPointDelta;
-        }
-      });
-    } else if (selectedTool == 'pencil' || selectedTool == 'eraser') {
-      // Only draw if it's a single finger gesture (no scaling)
-      if (details.scale == 1.0 && details.rotation == 0.0) {
-        _continueDrawingAt(details.focalPoint);
-      }
-    }
-  }
-
-  // Start drawing at the
-  void _onScaleEnd(ScaleEndDetails details) {
-    if (_isGeometricTool(selectedTool)) {
-      setState(() {
-        isDragging = false;
-      });
-    } else if (selectedTool == 'pencil' || selectedTool == 'eraser') {
-      setState(() {
-        isDrawing = false;
-      });
-    }
-  }
-
-  // Drawing functions
-  void _startDrawingAt(Offset position) {
-    if (selectedTool == 'pencil' || selectedTool == 'eraser') {
+  
+  // Handle pan start based on selected tool
+  void _handlePanStart(DragStartDetails details) {
+    if (selectedTool == 'pen') {
       setState(() {
         isDrawing = true;
-        final newPoint = DrawingPoints(
-          points: [position],
-          color: selectedTool == 'eraser' ? Colors.white : selectedColor,
-          width: selectedTool == 'eraser' ? strokeWidth * 3 : strokeWidth,
+        points.add(
+          DrawingPoints(
+            points: [details.localPosition],
+            color: selectedColor,
+            width: strokeWidth,
+          ),
         );
-        points.add(newPoint);
       });
     }
   }
-
-  void _continueDrawingAt(Offset position) {
-    if (isDrawing && (selectedTool == 'pencil' || selectedTool == 'eraser')) {
+  
+  // Handle pan update based on selected tool
+  void _handlePanUpdate(DragUpdateDetails details) {
+    if (selectedTool == 'pen' && isDrawing) {
       setState(() {
-        final lastPointIndex = points.length - 1;
-        if (lastPointIndex >= 0) {
-          final lastPointsList = points[lastPointIndex].points;
-          lastPointsList.add(position);
+        if (points.isNotEmpty) {
+          List<Offset> updatedPoints = List.from(points.last.points)
+            ..add(details.localPosition);
           
-          // Create a new point object with updated points list
-          points[lastPointIndex] = DrawingPoints(
-            points: lastPointsList,
-            color: points[lastPointIndex].color,
-            width: points[lastPointIndex].width,
+          points[points.length - 1] = DrawingPoints(
+            points: updatedPoints,
+            color: selectedColor,
+            width: strokeWidth,
           );
         }
       });
     }
   }
-
-  // Helper to check if a geometric tool is selected
-  bool _isGeometricTool(String tool) {
-    return ['compass', 'protractor', 'ruler', 'setSquare'].contains(tool);
-  }
-
-  // Zoom controls
-  void _zoomIn(Offset? center) {
-    setState(() {
-      final newScale = (scale * (1 + zoomFactor)).clamp(minZoom, maxZoom);
-      _updateZoom(newScale, center ?? Offset(MediaQuery.of(context).size.width / 2, 
-                                           MediaQuery.of(context).size.height / 2));
-    });
-  }
-
-  void _zoomOut(Offset? center) {
-    setState(() {
-      final newScale = (scale * (1 - zoomFactor)).clamp(minZoom, maxZoom);
-      _updateZoom(newScale, center ?? Offset(MediaQuery.of(context).size.width / 2, 
-                                           MediaQuery.of(context).size.height / 2));
-    });
-  }
-
-  void _updateZoom(double newScale, Offset center) {
-    // Calculate the vector from zoom center to position
-    final zoomCenter = center;
-    final positionVector = position - zoomCenter;
-    
-    // Apply zoom
-    final scaleFactor = newScale / scale;
-    final newPosition = zoomCenter + positionVector * scaleFactor;
-    
-    // Update state
-    scale = newScale;
-    position = newPosition;
-  }
-
-  // Tool creation widgets
-  Widget _buildCompassTool() {
-    return Positioned(
-      left: position.dx - compassRadius,
-      top: position.dy - compassRadius,
-      child: Transform.rotate(
-        angle: rotation,
-        child: GestureDetector(
-          onDoubleTap: () {
-            setState(() {
-              drawingWithCompass = !drawingWithCompass;
-              if (drawingWithCompass) {
-                compassCenter = position;
-              } else {
-                compassCenter = null;
-                compassPencilPosition = null;
-              }
-            });
-          },
-          child: CustomPaint(
-            size: Size(compassRadius * 2, compassRadius * 2),
-            painter: CompassPainter(
-              radius: compassRadius,
-              drawingMode: drawingWithCompass,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProtractorTool() {
-    return Positioned(
-      left: position.dx - protractorSize,
-      top: position.dy - protractorSize / 2,
-      child: Transform.rotate(
-        angle: rotation,
-        child: GestureDetector(
-          onDoubleTap: () {
-            setState(() {
-              isDrawingAngle = !isDrawingAngle;
-              if (isDrawingAngle) {
-                angleStartPoint = position;
-              } else {
-                angleStartPoint = null;
-                measuredAngle = 0.0;
-              }
-            });
-          },
-          child: CustomPaint(
-            size: Size(protractorSize * 2, protractorSize),
-            painter: ProtractorPainter(
-              size: protractorSize,
-              measuredAngle: measuredAngle,
-              isDrawingAngle: isDrawingAngle,
-              angleStartPoint: angleStartPoint,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRulerTool() {
-    return Positioned(
-      left: position.dx - rulerLength / 2,
-      top: position.dy - 20,
-      child: Transform.rotate(
-        angle: rotation,
-        child: GestureDetector(
-          onDoubleTap: () {
-            setState(() {
-              isDrawingLine = !isDrawingLine;
-              if (isDrawingLine) {
-                lineStartPoint = position;
-              } else {
-                lineStartPoint = null;
-              }
-            });
-          },
-          child: CustomPaint(
-            size: Size(rulerLength, 40),
-            painter: RulerPainter(
-              length: rulerLength,
-              cmToPixelRatio: cmToPixelRatio,
-              isDrawingLine: isDrawingLine,
-              lineStartPoint: lineStartPoint,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSetSquareTool() {
-    return Positioned(
-      left: position.dx - setSquareSize / 2,
-      top: position.dy - setSquareSize / 2,
-      child: Transform.rotate(
-        angle: rotation,
-        child: CustomPaint(
-          size: Size(setSquareSize, setSquareSize),
-          painter: SetSquarePainter(
-            size: setSquareSize,
-            cmToPixelRatio: cmToPixelRatio,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildToolButton(String tool, String label, IconData icon) {
-    final isSelected = selectedTool == tool;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: Icon(icon),
-            color: isSelected ? Colors.blue : Colors.black54,
-            iconSize: isSelected ? 32 : 24,
-            onPressed: () {
-              setState(() {
-                selectedTool = tool;
-              });
-            },
-          ),
-          Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.blue : Colors.black54,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildZoomButton({
-    required IconData icon,
-    required VoidCallback onPressed,
-    required String tooltip,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white70,
-        shape: BoxShape.circle,
-      ),
-      child: IconButton(
-        icon: Icon(icon),
-        onPressed: onPressed,
-        tooltip: tooltip,
-        iconSize: 24,
-        padding: const EdgeInsets.all(8),
-      ),
-    );
-  }
-
-  // Save canvas to image
-  Future<void> _saveCanvas() async {
-    try {
-      final boundary = canvasKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
-      if (boundary == null) return;
-      
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      
-      if (byteData != null) {
-        final pngBytes = byteData.buffer.asUint8List();
-        
-        // Get application documents directory to save the image
-        final directory = await getApplicationDocumentsDirectory();
-        final fileName = 'geometric_drawing_${DateTime.now().millisecondsSinceEpoch}.png';
-        final filePath = '${directory.path}/$fileName';
-        
-        // Write to file
-        final file = File(filePath);
-        await file.writeAsBytes(pngBytes);
-        
-        // Show success message
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Drawing saved to $filePath')),
-        );
-      }
-    } catch (e) {
-      print('Error saving canvas: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to save drawing')),
-      );
+  
+  // Handle pan end based on selected tool
+  void _handlePanEnd(DragEndDetails details) {
+    if (selectedTool == 'pen') {
+      setState(() {
+        isDrawing = false;
+      });
     }
   }
-
-  // Clear canvas
-  void _clearCanvas() {
-    setState(() {
-      points.clear();
-    });
-  }
-}
-
-// Main app
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Geometric Tools',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
-      ),
-      home: const GeometricToolsScreen(),
+  
+  // Show color picker dialog
+  void _showColorPicker() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Select Color'),
+          content: SingleChildScrollView(
+            child: Container(
+              width: 300,
+              height: 300,
+              child: GridView.builder(
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 5,
+                  crossAxisSpacing: 5,
+                  mainAxisSpacing: 5,
+                ),
+                itemCount: _colors.length,
+                itemBuilder: (context, index) {
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        selectedColor = _colors[index];
+                      });
+                      Navigator.of(context).pop();
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _colors[index],
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.black,
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
+  }
+  
+  // Color palette
+  final List<Color> _colors = [
+    Colors.black,
+    Colors.red,
+    Colors.blue,
+    Colors.green,
+    Colors.yellow,
+    Colors.orange,
+    Colors.purple,
+    Colors.brown,
+    Colors.grey,
+    Colors.teal,
+    Colors.pink,
+    Colors.indigo,
+    Colors.cyan,
+    Colors.lime,
+    Colors.amber,
+    Colors.deepOrange,
+    Colors.deepPurple,
+    Colors.lightBlue,
+    Colors.lightGreen,
+    Colors.redAccent,
+  ];
+  
+  // Show radius adjustment dialog for compass
+  void _showRadiusDialog() {
+    TextEditingController controller = TextEditingController(
+      text: (compassRadius / pixelToCmRatio).toStringAsFixed(1),
+    );
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Adjust Compass Radius'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                decoration: InputDecoration(
+                  labelText: 'Radius (cm)',
+                  suffixText: 'cm',
+                ),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+              ),
+              SizedBox(height: 20),
+              Text('Current mode: ${compassDrawMode.toString().split('.').last}'),
+              SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        compassDrawMode = CompassDrawMode.circle;
+                      });
+                      Navigator.pop(context);
+                    },
+                    child: Text('Circle'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        compassDrawMode = CompassDrawMode.arc;
+                      });
+                      Navigator.pop(context);
+                    },
+                    child: Text('Arc'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        compassDrawMode = CompassDrawMode.halfCircle;
+                      });
+                      Navigator.pop(context);
+                    },
+                    child: Text('Half Circle'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  double newRadius = double.tryParse(controller.text) ?? 5.0;
+                  compassRadius = newRadius * pixelToCmRatio;
+                });
+                Navigator.pop(context);
+              },
+              child: Text('Apply'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  
+  // Show ruler settings dialog
+  void _showRulerSettingsDialog() {
+    TextEditingController lengthController = TextEditingController(
+      text: (rulerLength / pixelToCmRatio).toStringAsFixed(1),
+    );
+    
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Ruler Settings'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: lengthController,
+                decoration: InputDecoration(
+                  labelText: 'Length (cm)',
+                  suffixText: 'cm',
+                ),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+              ),
+              SizedBox(height: 20),
+              CheckboxListTile(
+                title: Text('Snap to angles'),
+                value: snapAngles,
+                onChanged: (value) {
+                  setState(() {
+                    snapAngles = value ?? false;
+                  });
+                  Navigator.pop(context);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  double newLength = double.tryParse(lengthController.text) ?? 10.0;
+                  rulerLength = newLength * pixelToCmRatio;
+                });
+                Navigator.pop(context);
+              },
+              child: Text('Apply'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  
+  // Finalize compass drawing
+  void _finalizeCompassDrawing() {
+    if (compassPivotPoint != null) {
+      final properties = <String, dynamic>{
+        'center': compassPivotPoint,
+        'radius': compassCurrentRadius,
+        'showRadius': true,
+      };
+      
+      if (compassDrawMode == CompassDrawMode.circle) {
+        shapes.add(GeometricShape(
+          type: 'circle',
+          properties: properties,
+          color: selectedColor,
+          width: strokeWidth,
+        ));
+      } else if (compassDrawMode == CompassDrawMode.arc && compassEndAngle != null) {
+        shapes.add(GeometricShape(
+          type: 'arc',
+          properties: {
+            ...properties,
+            'startAngle': compassStartAngle,
+            'endAngle': compassEndAngle,
+          },
+          color: selectedColor,
+          width: strokeWidth,
+        ));
+      } else if (compassDrawMode == CompassDrawMode.halfCircle) {
+        shapes.add(GeometricShape(
+          type: 'arc',
+          properties: {
+            ...properties,
+            'startAngle': 0.0,
+            'endAngle': math.pi,
+          },
+          color: selectedColor,
+          width: strokeWidth,
+        ));
+      }
+      
+      setState(() {
+        compassDrawingMode = false;
+        compassPivotPoint = null;
+      });
+    }
+  }
+  
+  // Finalize angle measurement
+  void _finalizeAngleMeasurement() {
+    if (angleStartPoint != null && angleEndPoint != null) {
+      // Calculate angle
+      final dx = angleEndPoint!.dx - protractorPosition.dx;
+      final dy = protractorPosition.dy - angleEndPoint!.dy;
+      double angle = math.atan2(dy, dx);
+      if (angle < 0) angle += 2 * math.pi;
+      
+      shapes.add(GeometricShape(
+        type: 'angle',
+        properties: {
+          'center': protractorPosition,
+          'startAngle': 0,
+          'endAngle': angle,
+          'radius': protractorSize * 0.8,
+        },
+        color: selectedColor,
+        width: strokeWidth,
+      ));
+      
+      setState(() {
+        isDrawingAngle = false;
+        angleStartPoint = null;
+        angleEndPoint = null;
+      });
+    }
+  }
+  
+  // Finalize line measurement
+  void _finalizeLineMeasurement() {
+    if (lineStartPoint != null && lineEndPoint != null) {
+      Offset startPoint = lineStartPoint!;
+      Offset endPoint = lineEndPoint!;
+      
+      // Apply angle snapping if enabled
+      if (snapAngles) {
+        final dx = endPoint.dx - startPoint.dx;
+        final dy = endPoint.dy - startPoint.dy;
+        final length = math.sqrt(dx * dx + dy * dy);
+        final angle = math.atan2(dy, dx);
+        
+        // Snap to nearest 45 degrees
+        final snapAngle = (angle / (math.pi / 4)).round() * (math.pi / 4);
+        
+        endPoint = Offset(
+          startPoint.dx + length * math.cos(snapAngle),
+          startPoint.dy + length * math.sin(snapAngle),
+        );
+      }
+      
+      shapes.add(GeometricShape(
+        type: 'line',
+        properties: {
+          'start': startPoint,
+          'end': endPoint,
+          'showMeasurement': true,
+        },
+        color: selectedColor,
+        width: strokeWidth,
+      ));
+      
+      setState(() {
+        isDrawingLine = false;
+        lineStartPoint = null;
+        lineEndPoint = null;
+      });
+    }
+  }
+  
+  // Clear the canvas
+  void _clearCanvas() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Clear Canvas'),
+          content: Text('Are you sure you want to clear the entire canvas?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {
+                  points.clear();
+                  shapes.clear();
+                });
+                Navigator.pop(context);
+              },
+              child: Text('Clear'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+  
+  // Save canvas as image
+  Future<void> _saveCanvas() async {
+    try {
+      // Capture the canvas as an image
+      RenderRepaintBoundary boundary = canvasKey.currentContext!.findRenderObject() as RenderRepaintBoundary;
+      ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      
+      if (byteData == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save image')),
+        );
+        return;
+      }
+      
+      Uint8List pngBytes = byteData.buffer.asUint8List();
+      
+      // Get the app's documents directory
+      final directory = await getApplicationDocumentsDirectory();
+      final fileName = 'geometric_drawing_${DateTime.now().millisecondsSinceEpoch}.png';
+      final filePath = '${directory.path}/$fileName';
+      
+      // Write the file
+      final file = File(filePath);
+      await file.writeAsBytes(pngBytes);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Drawing saved to $filePath')),
+      );
+      
+      // Copy to clipboard option
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text('Drawing Saved'),
+            content: Text('Drawing saved to:\n$filePath\n\nWould you like to copy the path to clipboard?'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: Text('No'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: filePath));
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Path copied to clipboard')),
+                  );
+                },
+                child: Text('Copy Path'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving drawing: $e')),
+      );
+    }
   }
 }
