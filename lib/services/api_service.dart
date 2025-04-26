@@ -41,45 +41,54 @@ class ApiService {
 
   // Process image from raw bytes
   Future<ApiResponse> processImageBytes(Uint8List imageBytes) async {
-    try {
-      // Step 1: Upload the image to get a file ID
-      final filename =
-          'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
-      final fileId = await uploadFile(imageBytes, filename);
-
-      if (fileId == null) {
-        throw Exception('Failed to upload image');
-      }
-
-      debugPrint('File uploaded successfully with ID: $fileId');
-
-      // Step 2: Process the image with the AI model
-      final content = await processImage(fileId);
-
-      if (content == null) {
-        throw Exception('Failed to process image with AI');
-      }
-
-      // Print the response for debugging
-      debugPrint(
-        'Processed content: ${content.substring(0, min(100, content.length))}...',
-      );
-
-      // Return the response in the expected format
-      return ApiResponse(
-        success: true,
-        message: 'Image processed successfully',
-        sessionId: fileId,
-        htmlContent: content,
-      );
-    } catch (e) {
-      debugPrint('Process image failed: $e');
+  try {
+    // Step 1: Check if the API is available
+    final isHealthy = await checkHealth();
+    if (!isHealthy) {
+      debugPrint('API endpoint is not healthy');
       return ApiResponse(
         success: false,
-        message: 'Failed to process image: ${e.toString()}',
+        message: 'Could not connect to the API service. Please check your internet connection.',
       );
     }
+
+    // Step 2: Upload the image to get a file ID
+    final filename = 'whiteboard_${DateTime.now().millisecondsSinceEpoch}.png';
+    final fileId = await uploadFile(imageBytes, filename);
+
+    if (fileId == null) {
+      throw Exception('Failed to upload image');
+    }
+
+    debugPrint('File uploaded successfully with ID: $fileId');
+
+    // Step 3: Process the image with the AI model
+    final content = await processImage(fileId);
+
+    if (content == null) {
+      throw Exception('Failed to process image with AI');
+    }
+
+    // Print the response for debugging
+    debugPrint(
+      'Processed content: ${content.substring(0, min(100, content.length))}...',
+    );
+
+    // Return the response in the expected format
+    return ApiResponse(
+      success: true,
+      message: 'Image processed successfully',
+      sessionId: fileId,
+      htmlContent: content,
+    );
+  } catch (e) {
+    debugPrint('Process image failed: $e');
+    return ApiResponse(
+      success: false,
+      message: 'Failed to process image: ${e.toString()}',
+    );
   }
+}
 
   // Helper function to get min of two numbers
   int min(int a, int b) => a < b ? a : b;
@@ -216,28 +225,36 @@ class ApiService {
 
   // Function to process the image using llama3.2-vision:latest
   Future<String?> processImage(String fileId) async {
-    try {
-      // Get file content using fileId
-      final fileContent = await getFileContent(fileId);
-      if (fileContent == null) {
-        throw Exception('Failed to get file content');
-      }
+  try {
+    // Get file content using fileId
+    final fileContent = await getFileContent(fileId);
+    if (fileContent == null) {
+      throw Exception('Failed to get file content');
+    }
 
-      // Convert file bytes to base64 string
-      final base64Image = base64Encode(fileContent);
+    // Convert file bytes to base64 string
+    final base64Image = base64Encode(fileContent);
 
-      // Ensure baseUrl doesn't end with a slash
-      final baseUrlTrimmed =
-          baseUrl.endsWith('/')
-              ? baseUrl.substring(0, baseUrl.length - 1)
-              : baseUrl;
-      final url = Uri.parse('$baseUrlTrimmed/api/chat/completions');
+    // Ensure baseUrl doesn't end with a slash
+    final baseUrlTrimmed =
+        baseUrl.endsWith('/')
+            ? baseUrl.substring(0, baseUrl.length - 1)
+            : baseUrl;
+    final url = Uri.parse('$baseUrlTrimmed/api/chat/completions');
 
-      debugPrint('Processing image with chat completion API');
+    debugPrint('Processing image with chat completion API');
 
-      // Craft the prompt for Llama 3.2-vision
-      const prompt = '''
-Analyze the handwritten content in this whiteboard image and generate comprehensive educational notes. Please format your response as follows:
+    // Enhanced prompt for better handwriting recognition and text extraction
+    const prompt = '''
+Analyze the handwritten content in this whiteboard image and generate comprehensive educational notes. 
+Focus on accurately recognizing all text, diagrams, and notation, even if the handwriting is unclear.
+
+When analyzing the image:
+1. Pay special attention to mathematical symbols, equations, and scientific notation
+2. Look for structural relationships between concepts and elements
+3. Consider the context to help disambiguate unclear handwriting
+
+Please format your response as follows:
 
 1. Start with a clear title in bold (use ** on both sides)
 2. Organize content into logical sections with proper headings and subheadings:
@@ -255,62 +272,65 @@ Analyze the handwritten content in this whiteboard image and generate comprehens
 6. Add relevant context and explanations to deepen understanding
 7. End with a brief summary of key points
 
-Present everything as a well-structured markdown document that's easy to read and study from. Do not use ### symbols as heading markers.
+Present everything as a well-structured markdown document that's easy to read and study from.
 ''';
 
-      // Create payload matching Python implementation but with simpler prompt
-      final payload = {
-        'model': 'llama3.2-vision:latest',
-        'messages': [
-          {
-            'role': 'user',
-            'content': prompt,
-            'images': [base64Image],
+    // Create payload matching Python implementation but with enhanced prompt
+    final payload = {
+      'model': 'llama3.2-vision:latest',
+      'messages': [
+        {
+          'role': 'user',
+          'content': prompt,
+          'images': [base64Image],
+        },
+      ],
+      // Adding temperature parameter for more accurate recognition
+      'temperature': 0.2,
+      // Increasing max tokens for more comprehensive output
+      'max_tokens': 2048
+    };
+
+    // Send the request
+    final response = await http
+        .post(
+          url,
+          headers: {
+            'Authorization': 'Bearer $apiKey',
+            'Content-Type': 'application/json',
           },
-        ],
-      };
+          body: jsonEncode(payload),
+        )
+        .timeout(
+          const Duration(seconds: 120),
+        );
 
-      // Send the request
-      final response = await http
-          .post(
-            url,
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode(payload),
-          )
-          .timeout(
-            const Duration(seconds: 120),
-          ); // Longer timeout for processing
+    debugPrint('Process image response status: ${response.statusCode}');
 
-      debugPrint('Process image response status: ${response.statusCode}');
-
-      if (response.statusCode != 200) {
-        throw Exception('Failed to process image: ${response.statusCode}');
-      }
-
-      final jsonResponse = jsonDecode(response.body);
-      if (jsonResponse['choices'] == null ||
-          jsonResponse['choices'].isEmpty ||
-          jsonResponse['choices'][0]['message'] == null) {
-        debugPrint('Unexpected response format: $jsonResponse');
-        throw Exception('Unexpected response format from API');
-      }
-
-      final content = jsonResponse['choices'][0]['message']['content'];
-      debugPrint(
-        'Received content from API: ${content.substring(0, min(100, content.length))}...',
-      );
-
-      // Return the raw content from the model
-      return content;
-    } catch (e) {
-      debugPrint('Error processing image: $e');
-      return null;
+    if (response.statusCode != 200) {
+      throw Exception('Failed to process image: ${response.statusCode} - ${response.body}');
     }
-  }
 
+    final jsonResponse = jsonDecode(response.body);
+    if (jsonResponse['choices'] == null ||
+        jsonResponse['choices'].isEmpty ||
+        jsonResponse['choices'][0]['message'] == null) {
+      debugPrint('Unexpected response format: $jsonResponse');
+      throw Exception('Unexpected response format from API');
+    }
+
+    final content = jsonResponse['choices'][0]['message']['content'];
+    debugPrint(
+      'Received content from API: ${content.substring(0, min(100, content.length))}...',
+    );
+
+    // Return the raw content from the model
+    return content;
+  } catch (e) {
+    debugPrint('Error processing image: $e');
+    return null;
+  }
+}
   Future<Uint8List?> getFileContent(String fileId) async {
     try {
       // Ensure baseUrl doesn't end with a slash
@@ -743,98 +763,109 @@ Present everything as a well-structured markdown document that's easy to read an
 
   // Main function to process image and generate notes
   Future<void> processImageAndGenerateNotes(
-    material.BuildContext context,
-    Uint8List imageBytes,
-  ) async {
-    try {
-      // Show processing dialog
-      material.showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (material.BuildContext context) {
-          return material.AlertDialog(
-            content: material.Column(
-              mainAxisSize: material.MainAxisSize.min,
-              children: const [
-                material.CircularProgressIndicator(),
-                material.SizedBox(height: 16),
-                material.Text('Processing image and generating notes...'),
-              ],
-            ),
-          );
-        },
-      );
-
-      // Process the image with the API
-      final response = await processImageBytes(imageBytes);
-
-      // Close the processing dialog
-      if (material.Navigator.canPop(context)) {
-        material.Navigator.of(context).pop();
-      }
-
-      if (!response.success) {
-        // Show error message
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          material.SnackBar(
-            content: material.Text('Error: ${response.message}'),
-            duration: const Duration(seconds: 5),
-          ),
-        );
-        return;
-      }
-
-      debugPrint('API processed image successfully, displaying options');
-
-      // Check if htmlContent is not empty
-      if (response.htmlContent.isEmpty) {
-        material.ScaffoldMessenger.of(context).showSnackBar(
-          const material.SnackBar(
-            content: material.Text('Error: Received empty content from API'),
-            duration: Duration(seconds: 5),
-          ),
-        );
-        return;
-      }
-
-      // Show options dialog
-      material.showDialog(
-        context: context,
-        builder: (material.BuildContext context) {
-          return material.AlertDialog(
-            title: const material.Text('Save Notes'),
-            content: const material.Text('Choose an option:'),
-            actions: [
-              material.TextButton(
-                onPressed: () {
-                  material.Navigator.of(context).pop();
-                  showPreview(context, response.htmlContent);
-                },
-                child: const material.Text('Preview'),
-              ),
-              material.TextButton(
-                onPressed: () {
-                  material.Navigator.of(context).pop();
-                  exportAsPdf(context, response.htmlContent);
-                },
-                child: const material.Text('Export as PDF'),
+  material.BuildContext context,
+  Uint8List imageBytes,
+) async {
+  try {
+    // Show processing dialog with more detailed feedback
+    material.showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (material.BuildContext context) {
+        return material.AlertDialog(
+          content: material.Column(
+            mainAxisSize: material.MainAxisSize.min,
+            children: const [
+              material.CircularProgressIndicator(),
+              material.SizedBox(height: 16),
+              material.Text('Analyzing whiteboard content...'),
+              material.SizedBox(height: 8),
+              material.Text(
+                'This may take a minute for detailed recognition',
+                style: material.TextStyle(fontSize: 12),
               ),
             ],
-          );
-        },
-      );
-    } catch (e) {
-      // Close the processing dialog if open
-      if (material.Navigator.canPop(context)) {
-        material.Navigator.of(context).pop();
-      }
+          ),
+        );
+      },
+    );
 
+    // Process the image with the API
+    final response = await processImageBytes(imageBytes);
+
+    // Close the processing dialog
+    if (material.Navigator.canPop(context)) {
+      material.Navigator.of(context).pop();
+    }
+
+    if (!response.success) {
+      // Show error message with more helpful information
       material.ScaffoldMessenger.of(context).showSnackBar(
         material.SnackBar(
-          content: material.Text('Error: ${e.toString()}'),
+          content: material.Text('Recognition error: ${response.message}. Try selecting a clearer portion of the whiteboard.'),
           duration: const Duration(seconds: 5),
+          action: material.SnackBarAction(
+            label: 'Retry',
+            onPressed: () {
+              // Could implement retry logic here
+            },
+          ),
         ),
       );
+      return;
     }
+
+    debugPrint('API processed image successfully, displaying options');
+
+    // Check if htmlContent is not empty
+    if (response.htmlContent.isEmpty) {
+      material.ScaffoldMessenger.of(context).showSnackBar(
+        const material.SnackBar(
+          content: material.Text('Error: No content was recognized in the selected area. Try selecting a different area.'),
+          duration: Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+
+    // Show options dialog
+    material.showDialog(
+      context: context,
+      builder: (material.BuildContext context) {
+        return material.AlertDialog(
+          title: const material.Text('Whiteboard Content Recognized'),
+          content: const material.Text('Choose an option:'),
+          actions: [
+            material.TextButton(
+              onPressed: () {
+                material.Navigator.of(context).pop();
+                showPreview(context, response.htmlContent);
+              },
+              child: const material.Text('Preview'),
+            ),
+            material.TextButton(
+              onPressed: () {
+                material.Navigator.of(context).pop();
+                exportAsPdf(context, response.htmlContent);
+              },
+              child: const material.Text('Export as PDF'),
+            ),
+          ],
+        );
+      },
+    );
+  } catch (e) {
+    // Close the processing dialog if open
+    if (material.Navigator.canPop(context)) {
+      material.Navigator.of(context).pop();
+    }
+
+    material.ScaffoldMessenger.of(context).showSnackBar(
+      material.SnackBar(
+        content: material.Text('Error: ${e.toString()}'),
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
+}
 }

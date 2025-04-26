@@ -1,32 +1,38 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
-import 'package:smart_board/screens/shape_utils.dart';
-import 'package:smart_board/screens/shapemeasurement.dart';
-import '../painters/whiteboard_painter.dart' as painter;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+
 import '../models/drawing_point.dart';
-import 'package:smart_board/screens/geometric_tools_screen.dart';
+import '../widgets/whiteboard_painter.dart';
 import '../widgets/advanced_graph_dialog.dart';
-import '../services/ai_graph_service.dart';
-import '../models/graph_settings_model.dart';
-import '../services/nlp_graph_service.dart';
 import '../widgets/enhanced_graph_dialog.dart';
+import '../widgets/canvas_color_picker.dart';
+import '../widgets/whiteboard_controls/image_toggle_button.dart';
+
+import '../screens/shape_utils.dart';
+import '../screens/shapemeasurement.dart';
+import '../screens/geometric_tools_screen.dart';
+
+import '../services/ai_graph_service.dart';
 import '../services/graph_service.dart';
-import 'package:smart_board/widgets/whiteboard_controls/image_toggle_button.dart';
-import 'package:smart_board/config/app_config.dart';
-import 'package:smart_board/services/api_service.dart';
+import '../services/api_service.dart';
+import '../services/shape_selection_service.dart';
+import '../services/nlp_graph_service.dart';
+
+import '../models/graph_settings_model.dart';
+import '../config/app_config.dart';
 
 // Drawing mode enum
 enum DrawingMode {
   pen,
   eraser,
   graph,
-  geometric, // Added geometric mode to the enum
-  // Add other modes as needed
+  geometric,
+  shape, // Added shape mode
 }
 
 class WhiteboardScreen extends StatefulWidget {
@@ -45,6 +51,18 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
   double penStrokeWidth = 3.0;
   double eraserStrokeWidth = 15.0;
   DrawingMode currentMode = DrawingMode.pen;
+  Color canvasColor = Colors.white;
+  bool isShapeSelectionMode = false;
+  Rect? selectedAreaRect;
+  Offset? selectionStart;
+  Offset? selectionEnd;
+
+  // Shape drawing variables
+  ShapeType selectedShapeType = ShapeType.rectangle;
+  List<ShapeItem> shapes = [];
+  ShapeItem? currentShape;
+  Offset? shapeStartPoint;
+  bool showMeasurements = true;
 
   // Undo/Redo history
   List<List<DrawingPoint>> undoHistory = [];
@@ -59,8 +77,8 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
   // Selection mode
   bool isSelectionMode = false;
   Rect? selectionRect;
-  Offset? selectionStart;
-  Offset? selectionEnd;
+  Offset? selectionStarts;
+  Offset? selectionEnds;
 
   // Image/Grid toggle state
   bool _isGridVisible = false;
@@ -85,6 +103,38 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
   bool isToolbarVisible = false;
   late AnimationController _toolbarAnimationController;
   late Animation<double> _toolbarAnimation;
+
+  // Add this method to _WhiteboardScreenState class
+  void _selectCanvasColor() async {
+    final Color? selectedColor = await showCanvasColorPicker(
+      context: context,
+      currentColor: canvasColor,
+    );
+    
+    if (selectedColor != null) {
+      setState(() {
+        canvasColor = selectedColor;
+      });
+    }
+  }
+
+  void _toggleShapeSelectionMode() {
+    ShapeSelectionService.toggleShapeSelectionMode(
+      context, 
+      isShapeSelectionMode,
+      (value) {
+        setState(() {
+          isShapeSelectionMode = value;
+          // Clear any existing selection when toggling the mode
+          if (!value) {
+            selectedAreaRect = null;
+            selectionStart = null;
+            selectionEnd = null;
+          }
+        });
+      }
+    );
+  }
 
   @override
   void initState() {
@@ -127,6 +177,12 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     });
   }
 
+  void _toggleMeasurements() {
+    setState(() {
+      showMeasurements = !showMeasurements;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -153,7 +209,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 color: Colors.grey[200], // Background color
                 width: MediaQuery.of(context).size.width, // Full width
                 child: RepaintBoundary(
-                  key: _repaintBoundaryKey, // Added repaint boundary key here
+                  key: _repaintBoundaryKey,
                   child: Container(
                     key: _canvasAreaKey,
                     color: Colors.white, // Canvas always white
@@ -171,22 +227,38 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                         // Drawing canvas
                         GestureDetector(
                           onPanStart: (details) {
-                            _handleDrawStart(details);
+                            if (currentMode == DrawingMode.shape) {
+                              _handleShapeStart(details);
+                            } else {
+                              _handleDrawStart(details);
+                            }
                           },
                           onPanUpdate: (details) {
-                            _handleDrawUpdate(details);
+                            if (currentMode == DrawingMode.shape) {
+                              _handleShapeUpdate(details);
+                            } else {
+                              _handleDrawUpdate(details);
+                            }
                           },
                           onPanEnd: (_) {
-                            _handleDrawEnd();
+                            if (currentMode == DrawingMode.shape) {
+                              _handleShapeEnd();
+                            } else {
+                              _handleDrawEnd();
+                            }
                           },
                           child: CustomPaint(
-                            painter: painter.WhiteboardPainter(
+                            painter: WhiteboardPainter(
                               points: points,
-                              selectionRect: selectionRect,
-                              isSelectionMode: isSelectionMode,
+                              selectionRect: selectedAreaRect,
+                              isSelectionMode: isShapeSelectionMode,
+                              canvasColor: canvasColor,
+                              shapes: shapes,
+                              currentShape: currentShape,
+                              showMeasurements: showMeasurements,
                             ),
                             size: Size(canvasWidth, canvasHeight),
-                          ),
+                          )
                         ),
                       ],
                     ),
@@ -285,6 +357,19 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
       ),
     );
   }
+  // Add this method to your class
+void _toggleShapeMode() {
+  setState(() {
+    currentMode = DrawingMode.shape;
+    // Show temporary message
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Shape drawing mode activated'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+  });
+}
 
   // Navigate to the Geometric Tools screen
   void _navigateToGeometricTools() {
@@ -296,8 +381,77 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     );
   }
 
+  // Handle shape drawing methods
+  void _handleShapeStart(DragStartDetails details) {
+    ShapeUtils.handleShapeStart(
+      details,
+      _canvasAreaKey,
+      _scrollController,
+      selectedShapeType,
+      (startPoint) {
+        setState(() {
+          shapeStartPoint = startPoint;
+          currentShape = null;
+        });
+      },
+    );
+  }
+
+  void _handleShapeUpdate(DragUpdateDetails details) {
+    if (shapeStartPoint == null) return;
+    
+    ShapeUtils.handleShapeUpdate(
+      details,
+      _canvasAreaKey,
+      _scrollController,
+      shapeStartPoint!,
+      selectedShapeType,
+      (endPoint, shape) {
+        setState(() {
+          currentShape = shape;
+        });
+      },
+    );
+  }
+
+  void _handleShapeEnd() {
+    if (shapeStartPoint == null || currentShape == null) return;
+    
+    ShapeUtils.handleShapeEnd(
+      shapeStartPoint,
+      currentShape!.endPoint,
+      selectedShapeType,
+      (shape) {
+        setState(() {
+          shapes.add(shape);
+          currentShape = null;
+          shapeStartPoint = null;
+        });
+      },
+    );
+  }
+
   // UPDATED: Fixed drawing handlers to correctly transform coordinates
   void _handleDrawStart(DragStartDetails details) {
+    // Handle shape selection mode differently
+    if (isShapeSelectionMode) {
+      ShapeSelectionService.handleSelectionStart(
+        details,
+        _canvasAreaKey,
+        _scrollController,
+        canvasHeight,
+        (start, end, rect) {
+          setState(() {
+            selectionStart = start;
+            selectionEnd = end;
+            selectedAreaRect = rect;
+          });
+        }
+      );
+      return;
+    }
+
+    // Original drawing code continues below
     try {
       // Get the render box for coordinate calculation
       final RenderBox renderBox =
@@ -332,9 +486,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
           currentMode == DrawingMode.eraser ? Colors.white : selectedColor;
 
       double width =
-          currentMode == DrawingMode.eraser
-              ? eraserStrokeWidth
-              : penStrokeWidth;
+          currentMode == DrawingMode.eraser ? eraserStrokeWidth : penStrokeWidth;
 
       setState(() {
         // Add first point to current stroke
@@ -353,6 +505,25 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
   }
 
   void _handleDrawUpdate(DragUpdateDetails details) {
+    // Handle shape selection mode differently
+    if (isShapeSelectionMode) {
+      ShapeSelectionService.handleSelectionUpdate(
+        details,
+        _canvasAreaKey,
+        _scrollController,
+        canvasHeight,
+        selectionStart,
+        (end, rect) {
+          setState(() {
+            selectionEnd = end;
+            selectedAreaRect = rect;
+          });
+        }
+      );
+      return;
+    }
+
+    // Original drawing code continues below
     try {
       // Get the render box for coordinate calculation
       final RenderBox renderBox =
@@ -384,9 +555,7 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
           currentMode == DrawingMode.eraser ? Colors.white : selectedColor;
 
       double width =
-          currentMode == DrawingMode.eraser
-              ? eraserStrokeWidth
-              : penStrokeWidth;
+          currentMode == DrawingMode.eraser ? eraserStrokeWidth : penStrokeWidth;
 
       setState(() {
         // Add point to current stroke and main points list
@@ -404,7 +573,21 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     }
   }
 
+  // Modify _handleDrawEnd method to handle shape selection
   void _handleDrawEnd() {
+    // Handle shape selection mode differently
+    if (isShapeSelectionMode) {
+      ShapeSelectionService.handleSelectionEnd(
+        context,
+        selectionStart,
+        selectionEnd,
+        selectedAreaRect,
+        _processSelectedArea
+      );
+      return;
+    }
+
+    // Normal drawing mode code continues...
     if (currentStroke.isEmpty) return;
 
     setState(() {
@@ -420,6 +603,29 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
         currentStroke = [];
       }
     });
+  }
+
+  // Add this method to process the selected area
+  void _processSelectedArea() {
+    ShapeSelectionService.processSelectedArea(
+      context: context,
+      selectedAreaRect: selectedAreaRect,
+      repaintBoundaryKey: _repaintBoundaryKey,
+      isProcessing: _isProcessing,
+      setProcessingState: (value) {
+        setState(() {
+          _isProcessing = value;
+        });
+      },
+      resetSelectionState: () {
+        setState(() {
+          isShapeSelectionMode = false;
+          selectedAreaRect = null;
+          selectionStart = null;
+          selectionEnd = null;
+        });
+      }
+    );
   }
 
   Widget _buildToolbar() {
@@ -448,13 +654,29 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 onPressed: () => setState(() => currentMode = DrawingMode.pen),
                 color: selectedColor,
               ),
+              
+              // Canvas Color Button
+              _buildToolButton(
+                icon: Icons.format_color_fill,
+                isSelected: false,
+                onPressed: _selectCanvasColor,
+                tooltip: 'Canvas Color',
+                color: canvasColor == Colors.white ? Colors.grey : canvasColor,
+              ),
 
               // Eraser Button
               _buildToolButton(
                 icon: Icons.auto_fix_high,
                 isSelected: currentMode == DrawingMode.eraser,
-                onPressed:
-                    () => setState(() => currentMode = DrawingMode.eraser),
+                onPressed: () => setState(() => currentMode = DrawingMode.eraser),
+              ),
+              
+              // Shape Selection Button
+              _buildToolButton(
+                icon: Icons.crop,
+                isSelected: isShapeSelectionMode,
+                onPressed: _toggleShapeSelectionMode,
+                tooltip: 'Rectangle Selection',
               ),
 
               // Graph Button
@@ -472,6 +694,15 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
                 onPressed: () => _navigateToGeometricTools(),
                 tooltip: 'Geometric Tools',
               ),
+              
+              // Shape Drawing Button
+             // Shape Drawing Button (simpler approach)
+            _buildToolButton(
+              icon: Icons.crop_square,
+              isSelected: currentMode == DrawingMode.shape,
+              onPressed: _toggleShapeMode,
+              tooltip: 'Draw Shapes',
+            ),
 
               // Color Picker
               _buildColorPicker(),
@@ -480,6 +711,14 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
               ImageToggleButton(
                 onToggle: _toggleGrid,
                 isVisible: _isGridVisible,
+              ),
+
+              // Measurements Toggle Button
+              _buildToolButton(
+                icon: Icons.straighten,
+                isSelected: showMeasurements,
+                onPressed: _toggleMeasurements,
+                tooltip: 'Toggle Measurements',
               ),
 
               // Undo Button
@@ -499,31 +738,30 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
               // Clear Button
               IconButton(
                 icon: const Icon(Icons.delete_outline),
-                onPressed: points.isEmpty ? null : _showClearConfirmation,
-                color: points.isEmpty ? Colors.grey : Colors.black,
+                onPressed: points.isEmpty && shapes.isEmpty ? null : _showClearConfirmation,
+                color: points.isEmpty && shapes.isEmpty ? Colors.grey : Colors.black,
               ),
 
               // Shapes & Measurements Button
               IconButton(
-                icon: const Icon(Icons.crop_square),
-                tooltip: 'Shapes & Measurements',
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder:
-                          (context) => ShapeMeasurementScreen(
-                            onShapeCreated: (ShapeItem shape) {
-                              setState(() {
-                                // Add shape to your whiteboard's shape list
-                                // Example: shapes.add(shape);
-                              });
-                            },
-                          ),
-                    ),
-                  );
-                },
-              ),
+                  icon: const Icon(Icons.crop_square),
+                  tooltip: 'Shapes & Measurements',
+                  onPressed: () {
+                    // Instead of navigating, just switch to shape mode
+                    setState(() {
+                      currentMode = DrawingMode.shape;
+                      // You might want to select a default shape type
+                      selectedShapeType = ShapeType.rectangle;
+                    });
+                    // Show a message to inform the user
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Shape drawing mode activated'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
+                ),
 
               // Extend Canvas Button
               _buildToolButton(
@@ -534,6 +772,18 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
               ),
             ],
           ),
+
+          // Shape Type Selector (only show when in shape mode)
+          if (currentMode == DrawingMode.shape)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildShapeTypeButton(ShapeType.rectangle),
+                _buildShapeTypeButton(ShapeType.circle),
+                _buildShapeTypeButton(ShapeType.triangle),
+                _buildShapeTypeButton(ShapeType.square),
+              ],
+            ),
 
           // Size Sliders
           if (currentMode == DrawingMode.pen)
@@ -560,6 +810,44 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     );
   }
 
+  Widget _buildShapeTypeButton(ShapeType shapeType) {
+    IconData icon;
+    String tooltip;
+    
+    switch (shapeType) {
+      case ShapeType.rectangle:
+        icon = Icons.crop_landscape;
+        tooltip = 'Rectangle';
+        break;
+      case ShapeType.circle:
+        icon = Icons.circle_outlined;
+        tooltip = 'Circle';
+        break;
+      case ShapeType.triangle:
+        icon = Icons.change_history;
+        tooltip = 'Triangle';
+        break;
+      case ShapeType.square:
+        icon = Icons.crop_square;
+        tooltip = 'Square';
+        break;
+    }
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+      child: Tooltip(
+        message: tooltip,
+        child: IconButton(
+          icon: Icon(
+            icon,
+            color: selectedShapeType == shapeType ? selectedColor : Colors.grey,
+          ),
+          onPressed: () => setState(() => selectedShapeType = shapeType),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMoreMenu() {
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert),
@@ -573,29 +861,28 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
             break;
         }
       },
-      itemBuilder:
-          (context) => [
-            const PopupMenuItem(
-              value: 'save',
-              child: Row(
-                children: [
-                  Icon(Icons.save),
-                  SizedBox(width: 8),
-                  Text('Save Locally'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: 'share',
-              child: Row(
-                children: [
-                  Icon(Icons.share),
-                  SizedBox(width: 8),
-                  Text('Share'),
-                ],
-              ),
-            ),
-          ],
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'save',
+          child: Row(
+            children: [
+              Icon(Icons.save),
+              SizedBox(width: 8),
+              Text('Save Locally'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'share',
+          child: Row(
+            children: [
+              Icon(Icons.share),
+              SizedBox(width: 8),
+              Text('Share'),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -686,24 +973,23 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
   void _showClearConfirmation() {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Clear Canvas'),
-            content: const Text('Are you sure you want to clear the canvas?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _clearCanvas();
-                },
-                child: const Text('Clear'),
-              ),
-            ],
+      builder: (context) => AlertDialog(
+        title: const Text('Clear Canvas'),
+        content: const Text('Are you sure you want to clear the canvas?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _clearCanvas();
+            },
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -711,9 +997,8 @@ class _WhiteboardScreenState extends State<WhiteboardScreen>
     showDialog(
       context: context,
       barrierDismissible: false, // Prevent dismissing by tapping outside
-      builder:
-          (context) =>
-              AdvancedGraphDialog(onPlotRequested: _plotGraphWithSettings),
+      builder: (context) =>
+          AdvancedGraphDialog(onPlotRequested: _plotGraphWithSettings),
     );
   }
 

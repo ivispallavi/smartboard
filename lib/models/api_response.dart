@@ -3,14 +3,14 @@ class ApiResponse {
   final String message;
   final String sessionId;
   final String htmlContent;
-
+  
   ApiResponse({
     this.success = false,
     this.message = '',
     this.sessionId = '',
     this.htmlContent = '',
   });
-
+  
   // Create a copy with modified values
   ApiResponse copyWith({
     bool? success,
@@ -25,7 +25,7 @@ class ApiResponse {
       htmlContent: htmlContent ?? this.htmlContent,
     );
   }
-
+  
   // Factory to create from JSON
   factory ApiResponse.fromJson(Map<String, dynamic> json) {
     return ApiResponse(
@@ -35,7 +35,7 @@ class ApiResponse {
       htmlContent: json['html_content'] ?? '',
     );
   }
-
+  
   // Convert to JSON
   Map<String, dynamic> toJson() {
     return {
@@ -45,9 +45,14 @@ class ApiResponse {
       'html_content': htmlContent,
     };
   }
-
+  
+  // Added debug helper method to check content
+  String getSummary() {
+    return 'ApiResponse{success: $success, message: $message, sessionId: $sessionId, htmlContentLength: ${htmlContent.length}}';
+  }
+  
   @override
   String toString() {
-    return 'ApiResponse{success: $success, message: $message, sessionId: $sessionId, htmlContentLength: ${htmlContent.length}}';
+    return getSummary();
   }
 }

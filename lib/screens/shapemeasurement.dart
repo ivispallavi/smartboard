@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'shape_utils.dart'; // Make sure this has your ShapeType enum and ShapeItem class
+import 'shape_utils.dart';
 
 class ShapeMeasurementScreen extends StatefulWidget {
   final Function(ShapeItem)? onShapeCreated;
@@ -147,6 +147,52 @@ class _ShapeMeasurementScreenState extends State<ShapeMeasurementScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Main app entry point
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Shape Measurement App',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Shape Measurement App'),
+      ),
+      body: Center(
+        child: ElevatedButton(
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const ShapeMeasurementScreen(),
+              ),
+            );
+          },
+          child: const Text('Create Shape Measurements'),
         ),
       ),
     );

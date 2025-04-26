@@ -1,63 +1,86 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
 import '../models/drawing_point.dart';
+import '../screens/shape_utils.dart';
 
-/// Custom painter that handles rendering of the whiteboard content
 class WhiteboardPainter extends CustomPainter {
-  /// List of drawing points to render
   final List<DrawingPoint> points;
-  
-  /// Optional background image
   final ui.Image? backgroundImage;
-  
-  /// Optional selection rectangle when in selection mode
+  final Color canvasColor;
   final Rect? selectionRect;
-  
-  /// Whether the whiteboard is in selection mode
   final bool isSelectionMode;
-  
-  /// Creates a new whiteboard painter
+  final List<ShapeItem> shapes;
+  final ShapeItem? currentShape;
+  final bool showMeasurements;
+
   WhiteboardPainter({
     required this.points,
     this.backgroundImage,
+    this.canvasColor = Colors.white,
     this.selectionRect,
     this.isSelectionMode = false,
+    this.shapes = const [],
+    this.currentShape,
+    this.showMeasurements = true,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    // Draw background color
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = canvasColor,
+    );
+
     // Draw background image if available
     if (backgroundImage != null) {
-      canvas.drawImage(backgroundImage!, Offset.zero, Paint());
+      final dstRect = Rect.fromLTWH(0, 0, size.width, size.height);
+      canvas.drawImageRect(
+        backgroundImage!, 
+        Rect.fromLTWH(0, 0, backgroundImage!.width.toDouble(), backgroundImage!.height.toDouble()),
+        dstRect,
+        Paint()
+      );
     }
-    
+
+    // Clip canvas to size
+    canvas.clipRect(Rect.fromLTWH(0, 0, size.width, size.height));
+
     // Draw strokes
     for (int i = 0; i < points.length - 1; i++) {
-      // Skip the "invisible" points (used as stroke separators)
-      if (points[i].isEndOfStroke || points[i + 1].isEndOfStroke) {
-        continue;
-      }
-      
-      if (points[i].offset != Offset.zero && points[i + 1].offset != Offset.zero) {
+      if (points[i].offset != Offset.zero &&
+          points[i + 1].offset != Offset.zero &&
+          points[i].color != Colors.transparent &&
+          points[i + 1].color != Colors.transparent) {
         Paint paint = Paint()
           ..color = points[i].color
           ..strokeCap = StrokeCap.round
           ..strokeWidth = points[i].strokeWidth;
-        
         canvas.drawLine(points[i].offset, points[i + 1].offset, paint);
       }
     }
-    
+
+    // Draw completed shapes
+    for (final shape in shapes) {
+      ShapeUtils.drawShape(canvas, size, shape, showMeasurements);
+    }
+
+    // Draw current shape being created
+    if (currentShape != null) {
+      ShapeUtils.drawShape(canvas, size, currentShape!, showMeasurements);
+    }
+
     // Draw selection rectangle if in selection mode
     if (isSelectionMode && selectionRect != null) {
-      Paint selectionPaint = Paint()
+      final selectionPaint = Paint()
         ..color = Colors.blue.withOpacity(0.3)
+        ..strokeWidth = 2.0
         ..style = PaintingStyle.fill;
       
-      Paint borderPaint = Paint()
+      final borderPaint = Paint()
         ..color = Colors.blue
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.stroke;
       
       canvas.drawRect(selectionRect!, selectionPaint);
       canvas.drawRect(selectionRect!, borderPaint);
@@ -65,5 +88,5 @@ class WhiteboardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(CustomPainter oldDelegate) => true;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
